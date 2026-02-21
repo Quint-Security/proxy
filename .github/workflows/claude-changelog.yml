@@ -31,7 +31,7 @@ jobs:
         with:
           repository: Quint-Security/skills
           path: _skills
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_PAT }}
 
       - name: Install Claude CLI
         run: npm install -g @anthropic-ai/claude-code
