@@ -59,33 +59,56 @@ jobs:
           print(json.dumps(config, indent=2))
           " > /tmp/mcp-config.json
 
-      - name: Run changelog agent
+      - name: Build prompt
         env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURR: ${{ steps.tags.outputs.current }}
+          PREV: ${{ steps.tags.outputs.previous }}
+          REPO: ${{ github.repository }}
         run: |
-          SKILL=$(cat /tmp/skills/changelog-documentation/SKILL.md)
-          CURR="${{ steps.tags.outputs.current }}"
-          PREV="${{ steps.tags.outputs.previous }}"
-          TODAY=$(date -u +%Y-%m-%d)
+          python3 - << 'PYEOF'
+          import re, os
 
-          claude --print \
-            --mcp-config /tmp/mcp-config.json \
-            --allowedTools "Bash(git log:*),Bash(git tag:*),Bash(gh pr list:*),Bash(gh pr view:*)" \
-            -p "$SKILL
+          skill = open('/tmp/skills/changelog-documentation/SKILL.md').read()
+          skill = re.sub(r'^---\n.*?\n---\n', '', skill, count=1, flags=re.DOTALL)
+
+          curr = os.environ['CURR']
+          prev = os.environ.get('PREV') or 'none (first release)'
+          repo = os.environ['REPO']
+          page_id = '30e0b8d3f136806cb3adfeba61f9f30e'
+          git_range = f'{prev}..{curr}' if prev != 'none (first release)' else curr
+
+          import subprocess
+          today = subprocess.check_output(['date', '-u', '+%Y-%m-%d']).decode().strip()
+
+          prompt = f"""{skill}
 
           ---
 
           Apply the above guidelines to generate and publish a changelog entry.
 
           Release details:
-          - Repository: ${{ github.repository }}
-          - Version: $CURR
-          - Previous version: ${PREV:-none (first release)}
-          - Target Notion page ID: 30e0b8d3f136806cb3adfeba61f9f30e
+          - Repository: {repo}
+          - Version: {curr}
+          - Previous version: {prev}
+          - Target Notion page ID: {page_id}
 
-          1. Review commits: git log ${PREV:+${PREV}..}${CURR} --oneline --no-merges
+          1. Review commits: git log {git_range} --oneline --no-merges
           2. Review merged PRs: gh pr list --state merged
           3. Categorize and write entries per the skill guidelines above
-          4. Search Notion to confirm no duplicate entry for $CURR under page ID 30e0b8d3f136806cb3adfeba61f9f30e
-          5. Create a new child page under page ID 30e0b8d3f136806cb3adfeba61f9f30e titled '$CURR — $TODAY'"
+          4. Search Notion to confirm no duplicate entry for {curr} under page ID {page_id}
+          5. Create a new child page under page ID {page_id} titled '{curr} — {today}'
+          """
+
+          with open('/tmp/prompt.txt', 'w') as f:
+              f.write(prompt)
+          PYEOF
+
+      - name: Run changelog agent
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          claude --print \
+            --mcp-config /tmp/mcp-config.json \
+            --allowedTools "Bash(git log:*),Bash(git tag:*),Bash(gh pr list:*),Bash(gh pr view:*)" \
+            < /tmp/prompt.txt
