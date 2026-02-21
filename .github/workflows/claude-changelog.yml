@@ -95,8 +95,15 @@ jobs:
           1. Review commits: git log {git_range} --oneline --no-merges
           2. Review merged PRs: gh pr list --state merged
           3. Categorize and write entries per the skill guidelines above
-          4. Search Notion to confirm no duplicate entry for {curr} under page ID {page_id}
-          5. Create a new child page under page ID {page_id} titled '{curr} — {today}'
+          4. Use notion-search to find the 'Changelog Repository' inline database inside page ID {page_id}
+          5. Check that database for any existing entry named '{curr}' to avoid duplicates
+          6. Create a new entry in that database with these properties:
+             - Name: '{curr} — {today}'
+             - Tag: '{curr}'
+             - Brief Description: one sentence summary of the most important change in this release
+             - Github Link: https://github.com/{repo}/releases/tag/{curr}
+             - Created At: '{today}'
+             The full categorized changelog content goes in the body of the new database page.
           """
 
           with open('/tmp/prompt.txt', 'w') as f:
