@@ -1,0 +1,62 @@
+name: Changelog
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  changelog:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write
+      actions: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get previous tag
+        id: tags
+        run: |
+          CURRENT="${{ github.ref_name }}"
+          PREVIOUS=$(git tag --sort=-version:refname | grep -v "^${CURRENT}$" | head -n1)
+          echo "current=${CURRENT}" >> $GITHUB_OUTPUT
+          echo "previous=${PREVIOUS}" >> $GITHUB_OUTPUT
+
+      - name: Run changelog agent
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          plugin_marketplaces: 'https://github.com/Quint-Security/skills.git'
+          plugins: 'changelog-documentation'
+          mcp_config: |
+            {
+              "mcpServers": {
+                "notionApi": {
+                  "command": "npx",
+                  "args": ["-y", "@notionhq/notion-mcp-server"],
+                  "env": {
+                    "OPENAPI_MCP_HEADERS": "{\"Authorization\": \"Bearer ${{ secrets.NOTION_TOKEN }}\", \"Notion-Version\": \"2022-06-28\"}"
+                  }
+                }
+              }
+            }
+          prompt: |
+            Use the /changelog-documentation skill to generate and publish a changelog entry for this release.
+
+            Release details:
+            - Repository: ${{ github.repository }}
+            - Version: ${{ steps.tags.outputs.current }}
+            - Previous version: ${{ steps.tags.outputs.previous || 'none — this is the first release' }}
+            - Target Notion page ID: 30e0b8d3f136806cb3adfeba61f9f30e
+
+            1. Review commits and merged PRs included in this release using the version range above to determine the git range
+            2. Categorize changes and write human-readable entries following the changelog-documentation skill guidelines
+            3. Search Notion to verify no entry for ${{ steps.tags.outputs.current }} already exists under page ID 30e0b8d3f136806cb3adfeba61f9f30e
+            4. Create a new child page under page ID 30e0b8d3f136806cb3adfeba61f9f30e titled "${{ steps.tags.outputs.current }} — <today's date in YYYY-MM-DD>"
+          claude_args: '--allowed-tools Bash(git log:*) Bash(git tag:*) Bash(git describe:*) Bash(gh pr list:*) Bash(gh pr view:*)'
