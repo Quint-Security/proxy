@@ -103,9 +103,16 @@ jobs:
               f.write(prompt)
           PYEOF
 
+      - name: Set up Claude credentials
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          mkdir -p ~/.claude
+          python3 -c "import json,os; open(os.path.expanduser('~/.claude/.credentials.json'), 'w').write(json.dumps({'claudeAiOAuthToken': os.environ['CLAUDE_CODE_OAUTH_TOKEN']}))"
+
       - name: Run changelog agent
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           claude --print \
