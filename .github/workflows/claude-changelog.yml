@@ -116,6 +116,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           claude --print \
+            --dangerously-skip-permissions \
             --mcp-config /tmp/mcp-config.json \
             --allowedTools "Bash(git log:*),Bash(git tag:*),Bash(gh pr list:*),Bash(gh pr view:*)" \
             < /tmp/prompt.txt
