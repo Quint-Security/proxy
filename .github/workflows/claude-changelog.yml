@@ -11,8 +11,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-      id-token: write
-      actions: read
 
     steps:
       - name: Checkout repository
@@ -28,35 +26,66 @@ jobs:
           echo "current=${CURRENT}" >> $GITHUB_OUTPUT
           echo "previous=${PREVIOUS}" >> $GITHUB_OUTPUT
 
-      - name: Run changelog agent
-        uses: anthropics/claude-code-action@v1
+      - name: Checkout skills
+        uses: actions/checkout@v4
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/Quint-Security/skills.git'
-          plugins: 'changelog-documentation'
-          mcp_config: |
-            {
-              "mcpServers": {
-                "notionApi": {
-                  "command": "npx",
-                  "args": ["-y", "@notionhq/notion-mcp-server"],
-                  "env": {
-                    "OPENAPI_MCP_HEADERS": "{\"Authorization\": \"Bearer ${{ secrets.NOTION_TOKEN }}\", \"Notion-Version\": \"2022-06-28\"}"
-                  }
+          repository: Quint-Security/skills
+          path: /tmp/skills
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Claude CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Write MCP config
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+        run: |
+          python3 -c "
+          import json, os
+          config = {
+            'mcpServers': {
+              'notionApi': {
+                'command': 'npx',
+                'args': ['-y', '@notionhq/notion-mcp-server'],
+                'env': {
+                  'OPENAPI_MCP_HEADERS': json.dumps({
+                    'Authorization': 'Bearer ' + os.environ['NOTION_TOKEN'],
+                    'Notion-Version': '2022-06-28'
+                  })
                 }
               }
             }
-          prompt: |
-            Use the /changelog-documentation skill to generate and publish a changelog entry for this release.
+          }
+          print(json.dumps(config, indent=2))
+          " > /tmp/mcp-config.json
 
-            Release details:
-            - Repository: ${{ github.repository }}
-            - Version: ${{ steps.tags.outputs.current }}
-            - Previous version: ${{ steps.tags.outputs.previous || 'none — this is the first release' }}
-            - Target Notion page ID: 30e0b8d3f136806cb3adfeba61f9f30e
+      - name: Run changelog agent
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SKILL=$(cat /tmp/skills/changelog-documentation/SKILL.md)
+          CURR="${{ steps.tags.outputs.current }}"
+          PREV="${{ steps.tags.outputs.previous }}"
+          TODAY=$(date -u +%Y-%m-%d)
 
-            1. Review commits and merged PRs included in this release using the version range above to determine the git range
-            2. Categorize changes and write human-readable entries following the changelog-documentation skill guidelines
-            3. Search Notion to verify no entry for ${{ steps.tags.outputs.current }} already exists under page ID 30e0b8d3f136806cb3adfeba61f9f30e
-            4. Create a new child page under page ID 30e0b8d3f136806cb3adfeba61f9f30e titled "${{ steps.tags.outputs.current }} — <today's date in YYYY-MM-DD>"
-          claude_args: '--allowed-tools Bash(git log:*) Bash(git tag:*) Bash(git describe:*) Bash(gh pr list:*) Bash(gh pr view:*)'
+          claude --print \
+            --mcp-config /tmp/mcp-config.json \
+            --allowedTools "Bash(git log:*),Bash(git tag:*),Bash(gh pr list:*),Bash(gh pr view:*)" \
+            -p "$SKILL
+
+          ---
+
+          Apply the above guidelines to generate and publish a changelog entry.
+
+          Release details:
+          - Repository: ${{ github.repository }}
+          - Version: $CURR
+          - Previous version: ${PREV:-none (first release)}
+          - Target Notion page ID: 30e0b8d3f136806cb3adfeba61f9f30e
+
+          1. Review commits: git log ${PREV:+${PREV}..}${CURR} --oneline --no-merges
+          2. Review merged PRs: gh pr list --state merged
+          3. Categorize and write entries per the skill guidelines above
+          4. Search Notion to confirm no duplicate entry for $CURR under page ID 30e0b8d3f136806cb3adfeba61f9f30e
+          5. Create a new child page under page ID 30e0b8d3f136806cb3adfeba61f9f30e titled '$CURR — $TODAY'"
