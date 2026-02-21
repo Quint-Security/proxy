@@ -103,7 +103,8 @@ jobs:
              - Brief Description: one sentence summary of the most important change in this release
              - Github Link: https://github.com/{repo}/releases/tag/{curr}
              - Created At: '{today}'
-             The full categorized changelog content goes in the body of the new database page.
+             Before creating the page, check the database for any template pages and use the default template as the base structure for the new entry body.
+             The full categorized changelog content goes in the body of the new database page, following the template structure.
           """
 
           with open('/tmp/prompt.txt', 'w') as f:
