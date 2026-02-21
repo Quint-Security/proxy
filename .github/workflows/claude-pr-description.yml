@@ -1,0 +1,37 @@
+name: Claude PR Description
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  claude-pr-description:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate PR description
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          plugin_marketplaces: 'https://github.com/Quint-Security/skills.git'
+          plugins: 'documentation'
+          prompt: |
+            Use the /documentation skill to generate a clear, well-structured PR description for this pull request.
+
+            The description should follow our documentation standards and include:
+            - A concise summary of what this PR does and why
+            - Key changes made (grouped by concern)
+            - Any notable implementation decisions
+            - Testing notes if applicable
+
+            Update the PR description using the GitHub CLI: gh pr edit ${{ github.event.pull_request.number }} --body "<generated description>"
+          claude_args: '--allowed-tools Bash(gh pr edit:*)'
