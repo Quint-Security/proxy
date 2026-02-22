@@ -1,0 +1,5 @@
+quint-proxy
+dist/
+*.db
+*.db-wal
+*.db-shm
