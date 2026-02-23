@@ -46,6 +46,8 @@ var migrations = []string{
 	`ALTER TABLE audit_log ADD COLUMN nonce TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE audit_log ADD COLUMN risk_score INTEGER`,
 	`ALTER TABLE audit_log ADD COLUMN risk_level TEXT`,
+	`ALTER TABLE audit_log ADD COLUMN agent_id TEXT`,
+	`ALTER TABLE audit_log ADD COLUMN agent_name TEXT`,
 }
 
 const (
@@ -72,6 +74,8 @@ type Entry struct {
 	Nonce         string
 	Signature     string
 	PublicKey     string
+	AgentID       *string
+	AgentName     *string
 }
 
 // DB wraps the SQLite audit database.
@@ -155,12 +159,13 @@ func (d *DB) tryInsertAtomic(buildEntry func(prevSignature string) Entry) (int64
 		INSERT INTO audit_log
 			(timestamp, server_name, direction, method, message_id, tool_name,
 			 arguments_json, response_json, verdict, risk_score, risk_level,
-			 policy_hash, prev_hash, nonce, signature, public_key)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.Timestamp, entry.ServerName, entry.Direction, entry.Method,
 		entry.MessageID, entry.ToolName, entry.ArgumentsJSON, entry.ResponseJSON,
 		entry.Verdict, entry.RiskScore, entry.RiskLevel,
 		entry.PolicyHash, entry.PrevHash, entry.Nonce, entry.Signature, entry.PublicKey,
+		entry.AgentID, entry.AgentName,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert audit entry: %w", err)

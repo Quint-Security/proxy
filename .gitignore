@@ -4,4 +4,4 @@ dist/
 *.db
 *.db-wal
 *.db-shm
-proxy
+/proxy

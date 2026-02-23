@@ -32,7 +32,7 @@ func initAudit(dataDir string, policy intercept.PolicyConfig, logEntry *logEntry
 
 	logger := audit.NewLogger(db, kp.PrivateKey, kp.PublicKey, policyMap)
 
-	*logEntry = func(serverName, direction, method, messageID, toolName, argsJSON, respJSON string, verdict intercept.Verdict, riskScore *int, riskLevel *string) {
+	*logEntry = func(serverName, direction, method, messageID, toolName, argsJSON, respJSON string, verdict string, riskScore *int, riskLevel *string) {
 		logger.Log(audit.LogOpts{
 			ServerName:    serverName,
 			Direction:     direction,
@@ -41,7 +41,7 @@ func initAudit(dataDir string, policy intercept.PolicyConfig, logEntry *logEntry
 			ToolName:      toolName,
 			ArgumentsJSON: argsJSON,
 			ResponseJSON:  respJSON,
-			Verdict:       string(verdict),
+			Verdict:       verdict,
 			RiskScore:     riskScore,
 			RiskLevel:     riskLevel,
 		})

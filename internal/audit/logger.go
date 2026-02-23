@@ -43,6 +43,8 @@ type LogOpts struct {
 	Verdict       string
 	RiskScore     *int
 	RiskLevel     *string
+	AgentID       string
+	AgentName     string
 }
 
 // Log creates a signed audit entry and inserts it atomically.
@@ -61,12 +63,15 @@ func (l *Logger) Log(opts LogOpts) {
 		toolName := strPtr(opts.ToolName)
 		argsJSON := strPtr(opts.ArgumentsJSON)
 		respJSON := strPtr(opts.ResponseJSON)
+		agentID := strPtr(opts.AgentID)
+		agentName := strPtr(opts.AgentName)
 
 		obj := crypto.BuildSignableObject(
 			timestamp, opts.ServerName, opts.Direction, opts.Method,
 			msgID, toolName, argsJSON, respJSON,
 			opts.Verdict, l.policyHash, prevHash, nonce, l.publicKey,
 			opts.RiskScore, opts.RiskLevel,
+			agentID, agentName,
 		)
 
 		canonical, err := crypto.Canonicalize(obj)
@@ -98,6 +103,8 @@ func (l *Logger) Log(opts LogOpts) {
 			Nonce:         nonce,
 			Signature:     sig,
 			PublicKey:     l.publicKey,
+			AgentID:       agentID,
+			AgentName:     agentName,
 		}
 	})
 	if err != nil {
