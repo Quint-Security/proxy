@@ -125,7 +125,7 @@ func main() {
 	var revoke revokeFunc = func(_ string) bool { return false }
 
 	// Phase 2: Wire crypto + audit
-	initAudit(dataDir, policy, &logEntry)
+	initAudit(dataDir, policy, &logEntry, agentIdentity)
 
 	// Phase 3: Wire risk engine
 	initRisk(dataDir, policy, &scoreTool, &evalRisk, &revoke)

@@ -478,6 +478,32 @@ func (p *Proxy) sendRemoteError(w http.ResponseWriter, err error) {
 	w.Write([]byte(errBody))
 }
 
+// requireOperatorAuth checks the bearer token for approval management endpoints.
+// Only non-agent API keys are accepted (agents cannot approve their own requests).
+func (p *Proxy) requireOperatorAuth(w http.ResponseWriter, r *http.Request) bool {
+	if p.authDB == nil {
+		return true // no auth configured, allow
+	}
+	authHeader := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		w.WriteHeader(401)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Authorization required for approval management"})
+		return false
+	}
+	identity, _ := p.authDB.ResolveIdentity(authHeader[7:])
+	if identity == nil {
+		w.WriteHeader(401)
+		json.NewEncoder(w).Encode(map[string]string{"error": "invalid or expired API key"})
+		return false
+	}
+	if identity.IsAgent {
+		w.WriteHeader(403)
+		json.NewEncoder(w).Encode(map[string]string{"error": "agents cannot manage approvals"})
+		return false
+	}
+	return true
+}
+
 // handleApprovals lists pending approval requests (GET /approvals).
 func (p *Proxy) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -491,6 +517,10 @@ func (p *Proxy) handleApprovals(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		w.WriteHeader(405)
 		json.NewEncoder(w).Encode(map[string]string{"error": "use GET"})
+		return
+	}
+
+	if !p.requireOperatorAuth(w, r) {
 		return
 	}
 
@@ -517,6 +547,10 @@ func (p *Proxy) handleApprovalAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		w.WriteHeader(405)
 		json.NewEncoder(w).Encode(map[string]string{"error": "use POST"})
+		return
+	}
+
+	if !p.requireOperatorAuth(w, r) {
 		return
 	}
 
