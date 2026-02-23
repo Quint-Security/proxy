@@ -55,6 +55,15 @@ func main() {
 		case "deny":
 			runDeny(os.Args[2:])
 			return
+		case "verify":
+			runVerify(os.Args[2:])
+			return
+		case "sync":
+			runSync(os.Args[2:])
+			return
+		case "connect":
+			runConnect(os.Args[2:])
+			return
 		case "--version", "version":
 			fmt.Println(version)
 			return
