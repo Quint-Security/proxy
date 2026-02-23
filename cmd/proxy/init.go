@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Quint-Security/quint-proxy/internal/crypto"
+	"github.com/Quint-Security/quint-proxy/internal/gateway"
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
 )
 
@@ -179,42 +180,49 @@ func runInit(args []string) {
 		fmt.Printf("  Policy: %s (exists, not overwritten)\n", policyPath)
 	}
 
-	// Show or apply config changes
-	toWrap := filterUnproxied(servers)
-	if len(toWrap) > 0 {
-		fmt.Printf("\n  Config changes needed for %d server(s):\n\n", len(toWrap))
-		for _, s := range toWrap {
-			wrapped := generateWrappedConfig(s)
-			if wrapped == nil {
-				continue
-			}
-			var before, after []byte
-			if s.Config.Command != "" {
-				before, _ = json.Marshal(map[string]any{"command": s.Config.Command, "args": s.Config.Args})
-				after, _ = json.Marshal(map[string]any{"command": wrapped.Command, "args": wrapped.Args})
-			} else if s.Config.URL != "" {
-				before, _ = json.Marshal(map[string]any{"url": s.Config.URL})
-				afterMap := map[string]any{"url": wrapped.URL}
-				if wrapped.Type != "" {
-					afterMap["type"] = wrapped.Type
-				}
-				after, _ = json.Marshal(afterMap)
-			}
-			fmt.Printf("    %s:\n      before: %s\n      after:  %s\n\n", s.Name, before, after)
-		}
+	// Gateway mode: generate servers.json and replace all MCP entries with one "quint" entry
+	nonProxied := filterUnproxied(servers)
+	if len(nonProxied) == 0 {
+		fmt.Println("\n  All servers already proxied through Quint.")
+		fmt.Println("\n  Setup complete.")
+		return
+	}
 
-		if apply && !dryRun {
-			applied := applyToClaudeConfig(toWrap)
-			fmt.Printf("  Applied %d change(s) to ~/.claude.json\n", applied)
-			fmt.Println("  Restart Claude Code for changes to take effect.")
-		} else if dryRun {
-			fmt.Println("  (dry run — no changes made)")
-		} else {
-			fmt.Println("  Run with --apply to modify ~/.claude.json automatically.")
-			fmt.Println("  Run with --revert to undo Quint proxying.")
+	self, _ := os.Executable()
+	fmt.Printf("\n  Gateway mode: %d server(s) will be managed by Quint\n\n", len(nonProxied))
+
+	// Show what will happen
+	for _, s := range nonProxied {
+		if s.Config.Command != "" {
+			fmt.Printf("    %s [stdio] → managed by quint gateway\n", s.Name)
+		} else if s.Config.URL != "" {
+			fmt.Printf("    %s [HTTP: %s] → managed by quint gateway\n", s.Name, s.Config.URL)
 		}
+	}
+
+	fmt.Printf("\n  Claude Code config will be replaced with:\n")
+	fmt.Printf("    quint: { command: %s, args: [start] }\n", self)
+
+	if apply && !dryRun {
+		// Generate servers.json
+		gatewayCfg := buildGatewayConfig(nonProxied)
+		serversPath := filepath.Join(dataDir, "servers.json")
+		data, _ := json.MarshalIndent(gatewayCfg, "", "  ")
+		os.WriteFile(serversPath, append(data, '\n'), 0o644)
+		fmt.Printf("\n  Servers config: %s (%d servers)\n", serversPath, len(gatewayCfg.Servers))
+
+		// Save original config for revert
+		saveOriginalConfig(dataDir, servers)
+
+		// Replace all MCP entries with single "quint" entry
+		applyGatewayConfig(servers, self)
+		fmt.Println("  Applied gateway config to ~/.claude.json")
+		fmt.Println("  Restart Claude Code for changes to take effect.")
+	} else if dryRun {
+		fmt.Println("\n  (dry run — no changes made)")
 	} else {
-		fmt.Println("\n  All servers are already proxied through Quint.")
+		fmt.Println("\n  Run with --apply to apply changes.")
+		fmt.Println("  Run with --revert to undo.")
 	}
 
 	fmt.Println("\n  Setup complete.")
@@ -482,6 +490,133 @@ func filterProxied(servers []detectedServer) []detectedServer {
 		}
 	}
 	return out
+}
+
+func buildGatewayConfig(servers []detectedServer) gateway.Config {
+	cfg := gateway.Config{Servers: map[string]gateway.ServerConfig{}}
+	for _, s := range servers {
+		if s.Config.Command != "" {
+			sc := gateway.ServerConfig{
+				Command: s.Config.Command,
+				Args:    s.Config.Args,
+			}
+			if s.Config.Env != nil {
+				sc.Env = s.Config.Env
+			}
+			cfg.Servers[s.Name] = sc
+		} else if s.Config.URL != "" {
+			sc := gateway.ServerConfig{
+				URL:       s.Config.URL,
+				Transport: s.Config.Type,
+			}
+			cfg.Servers[s.Name] = sc
+		}
+	}
+	return cfg
+}
+
+func saveOriginalConfig(dataDir string, servers []detectedServer) {
+	original := map[string]any{}
+	for _, s := range servers {
+		entry := map[string]any{}
+		if s.Config.Command != "" {
+			entry["command"] = s.Config.Command
+			entry["args"] = s.Config.Args
+		}
+		if s.Config.URL != "" {
+			entry["url"] = s.Config.URL
+		}
+		if s.Config.Type != "" {
+			entry["type"] = s.Config.Type
+		}
+		entry["source"] = s.Source
+		original[s.Name] = entry
+	}
+	data, _ := json.MarshalIndent(original, "", "  ")
+	os.WriteFile(filepath.Join(dataDir, "original_servers.json"), append(data, '\n'), 0o644)
+}
+
+func applyGatewayConfig(servers []detectedServer, selfPath string) {
+	home, _ := os.UserHomeDir()
+	configPath := filepath.Join(home, ".claude.json")
+	data, _ := os.ReadFile(configPath)
+
+	var config map[string]any
+	json.Unmarshal(data, &config)
+
+	quintEntry := map[string]any{
+		"command": selfPath,
+		"args":    []string{"start"},
+	}
+
+	// Replace top-level mcpServers: remove all detected, add "quint"
+	topServers, _ := config["mcpServers"].(map[string]any)
+	if topServers == nil {
+		topServers = map[string]any{}
+		config["mcpServers"] = topServers
+	}
+
+	for _, s := range servers {
+		if s.Source == "global" {
+			delete(topServers, s.Name)
+		}
+	}
+	topServers["quint"] = quintEntry
+
+	// Remove detected servers from project-level configs
+	if projects, ok := config["projects"].(map[string]any); ok {
+		for _, proj := range projects {
+			projMap, _ := proj.(map[string]any)
+			projServers, _ := projMap["mcpServers"].(map[string]any)
+			if projServers != nil {
+				for _, s := range servers {
+					if s.Source == "project" {
+						delete(projServers, s.Name)
+					}
+				}
+			}
+		}
+	}
+
+	out, _ := json.MarshalIndent(config, "", "  ")
+	os.WriteFile(configPath, append(out, '\n'), 0o644)
+}
+
+// saveHTTPTargets persists the original URLs for HTTP MCP servers so `start` can forward to them.
+func saveHTTPTargets(dataDir string, servers []detectedServer) {
+	targets := map[string]httpTarget{}
+	for _, s := range servers {
+		if s.Config.URL != "" && !s.AlreadyProxied {
+			port := 17100 + hashPort(s.Name)
+			targets[s.Name] = httpTarget{
+				OriginalURL: s.Config.URL,
+				LocalPort:   port,
+			}
+		}
+	}
+	if len(targets) == 0 {
+		return
+	}
+	data, _ := json.MarshalIndent(targets, "", "  ")
+	os.MkdirAll(dataDir, 0o700)
+	os.WriteFile(filepath.Join(dataDir, "http_targets.json"), data, 0o644)
+}
+
+type httpTarget struct {
+	OriginalURL string `json:"original_url"`
+	LocalPort   int    `json:"local_port"`
+}
+
+// loadHTTPTargets reads the saved HTTP proxy targets.
+func loadHTTPTargets(dataDir string) map[string]httpTarget {
+	path := filepath.Join(dataDir, "http_targets.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var targets map[string]httpTarget
+	json.Unmarshal(data, &targets)
+	return targets
 }
 
 func rolePresetNames() []string {

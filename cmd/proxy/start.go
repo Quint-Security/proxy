@@ -1,25 +1,37 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 
+	"github.com/Quint-Security/quint-proxy/internal/audit"
+	"github.com/Quint-Security/quint-proxy/internal/auth"
+	"github.com/Quint-Security/quint-proxy/internal/crypto"
+	"github.com/Quint-Security/quint-proxy/internal/gateway"
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
 	qlog "github.com/Quint-Security/quint-proxy/internal/log"
+	"github.com/Quint-Security/quint-proxy/internal/risk"
 )
 
-// runStart handles: quint-proxy start [--policy <path>]
-// Starts HTTP proxies for all wrapped HTTP MCP servers.
+// runStart handles: quint-proxy start [--policy <path>] [--agent <name>]
+// Starts the MCP gateway multiplexer. All downstream servers defined in
+// servers.json are started and presented as one unified MCP server via stdio.
 func runStart(args []string) {
-	var policyPath string
+	var policyPath, agentFlag string
 	for i := 0; i < len(args); i++ {
-		if args[i] == "--policy" {
+		switch args[i] {
+		case "--policy":
 			i++
 			if i < len(args) {
 				policyPath = args[i]
+			}
+		case "--agent":
+			i++
+			if i < len(args) {
+				agentFlag = args[i]
 			}
 		}
 	}
@@ -30,65 +42,93 @@ func runStart(args []string) {
 		os.Exit(1)
 	}
 	qlog.SetLevel(policy.LogLevel)
+	dataDir := intercept.ResolveDataDir(policy.DataDir)
 
-	// Detect which servers need HTTP proxies
-	servers := detectMcpServers()
-	var httpServers []detectedServer
-	for _, s := range servers {
-		if s.AlreadyProxied && s.Config.URL != "" {
-			// This is an HTTP server already proxied through quint — find its original target
-			httpServers = append(httpServers, s)
-		}
+	// Load gateway config
+	cfg, err := gateway.LoadConfig(dataDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "No servers.json found in %s.\nRun `quint-proxy init --apply` to generate it.\n", dataDir)
+		os.Exit(1)
 	}
 
-	// Also find un-proxied HTTP servers (in case init hasn't been applied yet)
-	for _, s := range servers {
-		if !s.AlreadyProxied && s.Config.URL != "" {
-			httpServers = append(httpServers, s)
-		}
-	}
-
-	if len(httpServers) == 0 {
-		fmt.Println("No HTTP MCP servers found to proxy.")
-		fmt.Println("Run `quint-proxy init --apply` first to configure your MCP servers.")
+	if len(cfg.Servers) == 0 {
+		fmt.Println("No servers configured in servers.json.")
 		return
 	}
 
-	fmt.Printf("Starting %d HTTP proxy(ies)...\n\n", len(httpServers))
+	// Set up audit logger
+	passphrase := os.Getenv("QUINT_PASSPHRASE")
+	kp, err := crypto.EnsureKeyPair(dataDir, passphrase)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load keys: %v\n", err)
+		os.Exit(1)
+	}
+	auditDB, err := audit.OpenDB(dataDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to open audit DB: %v\n", err)
+		os.Exit(1)
+	}
+	defer auditDB.Close()
 
-	// Launch each proxy
-	for _, s := range httpServers {
-		target := s.Config.URL
-		port := 17100 + hashPort(s.Name)
+	policyBytes, _ := json.Marshal(policy)
+	var policyMap map[string]any
+	json.Unmarshal(policyBytes, &policyMap)
+	logger := audit.NewLogger(auditDB, kp.PrivateKey, kp.PublicKey, policyMap)
 
-		// If already proxied, target is the localhost URL — we need the original
-		// For now, start with the servers that haven't been proxied
-		if s.AlreadyProxied {
-			// Extract original URL from the before-proxy state
-			// The original URL was replaced — we can't recover it from the config.
-			// Skip already-proxied servers.
-			continue
-		}
+	// Set up risk engine
+	behaviorDB, _ := risk.OpenBehaviorDB(dataDir)
+	if behaviorDB != nil {
+		defer behaviorDB.Close()
+	}
+	riskEngine := risk.NewEngine(&risk.EngineOpts{BehaviorDB: behaviorDB})
 
-		proxyArgs := []string{
-			"--name", s.Name,
-			"--target", target,
-			"--port", strconv.Itoa(port),
-		}
-		if policyPath != "" {
-			proxyArgs = append(proxyArgs, "--policy", policyPath)
-		}
-
-		fmt.Printf("  %s: http://localhost:%d → %s\n", s.Name, port, target)
-		go func(name string, a []string) {
-			runHTTPProxy(a)
-		}(s.Name, proxyArgs)
+	// Resolve agent identity
+	agentName := agentFlag
+	if agentName == "" {
+		agentName = os.Getenv("QUINT_AGENT")
 	}
 
-	fmt.Println("\nAll proxies running. Press Ctrl+C to stop.")
+	var identity *auth.Identity
+	if agentName != "" {
+		authDB, err := auth.OpenDB(dataDir)
+		if err == nil {
+			defer authDB.Close()
+			identity, err = authDB.ResolveAgentByName(agentName)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "quint: %v\n", err)
+				os.Exit(1)
+			}
+			qlog.Info("running as agent %q", identity.AgentName)
+		}
+	}
 
+	// Create and start gateway
+	gw, err := gateway.New(cfg, gateway.GatewayOpts{
+		Policy:     policy,
+		Logger:     logger,
+		RiskEngine: riskEngine,
+		Identity:   identity,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create gateway: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := gw.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to start gateway: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Handle shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-	<-sigCh
-	fmt.Println("\nStopping proxies...")
+	go func() {
+		<-sigCh
+		gw.Stop()
+		os.Exit(0)
+	}()
+
+	// Run the stdio MCP server (blocks until stdin closes)
+	gw.Run()
+	gw.Stop()
 }
