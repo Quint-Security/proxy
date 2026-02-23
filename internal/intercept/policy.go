@@ -73,11 +73,13 @@ type PolicyConfig struct {
 	Version                int            `json:"version"`
 	DataDir                string         `json:"data_dir"`
 	LogLevel               string         `json:"log_level"`
-	FailMode               string         `json:"fail_mode,omitempty"` // "open" or "closed" (default "closed")
+	FailMode               string         `json:"fail_mode,omitempty"`  // "open" or "closed" (default "closed")
 	Servers                []ServerPolicy `json:"servers"`
 	Risk                   *RiskConfig    `json:"risk,omitempty"`
 	ApprovalRequired       bool           `json:"approval_required,omitempty"`
 	ApprovalTimeoutSeconds int            `json:"approval_timeout_seconds,omitempty"`
+	RateLimitRpm           int            `json:"rate_limit_rpm,omitempty"`
+	RateLimitBurst         int            `json:"rate_limit_burst,omitempty"`
 }
 
 // GetApprovalTimeout returns the effective approval timeout in seconds, defaulting to 300.
@@ -86,6 +88,22 @@ func (p PolicyConfig) GetApprovalTimeout() int {
 		return p.ApprovalTimeoutSeconds
 	}
 	return 300
+}
+
+// GetRateLimitRpm returns the effective rate limit in requests per minute, defaulting to 60.
+func (p PolicyConfig) GetRateLimitRpm() int {
+	if p.RateLimitRpm > 0 {
+		return p.RateLimitRpm
+	}
+	return 60
+}
+
+// GetRateLimitBurst returns the effective rate limit burst, defaulting to 10.
+func (p PolicyConfig) GetRateLimitBurst() int {
+	if p.RateLimitBurst > 0 {
+		return p.RateLimitBurst
+	}
+	return 10
 }
 
 // GetFailMode returns the effective fail mode, defaulting to "closed".

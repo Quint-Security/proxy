@@ -31,6 +31,9 @@ func main() {
 	// Check for subcommands before flag parsing
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "start":
+			runStart(os.Args[2:])
+			return
 		case "dashboard":
 			runDashboard(os.Args[2:])
 			return
@@ -121,17 +124,17 @@ func main() {
 	if resolvedAgent != "" {
 		authDB, err := auth.OpenDB(dataDir)
 		if err != nil {
-			qlog.Error("failed to open auth db for agent resolution: %v", err)
-		} else {
-			identity, err := authDB.ResolveAgentByName(resolvedAgent)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "quint: %v\n", err)
-				os.Exit(1)
-			}
-			agentIdentity = identity
-			cleanupFuncs = append(cleanupFuncs, func() { authDB.Close() })
-			qlog.Info("running as agent %q (%s, scopes=%v)", identity.AgentName, identity.AgentID, identity.Scopes)
+			fmt.Fprintf(os.Stderr, "quint: --agent requires auth database: %v\n", err)
+			os.Exit(1)
 		}
+		identity, err := authDB.ResolveAgentByName(resolvedAgent)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "quint: %v\n", err)
+			os.Exit(1)
+		}
+		agentIdentity = identity
+		cleanupFuncs = append(cleanupFuncs, func() { authDB.Close() })
+		qlog.Info("running as agent %q (%s, scopes=%v)", identity.AgentName, identity.AgentID, identity.Scopes)
 	}
 
 	// Initialize with stubs — phases replace these

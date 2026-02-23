@@ -188,8 +188,18 @@ func runInit(args []string) {
 			if wrapped == nil {
 				continue
 			}
-			before, _ := json.Marshal(map[string]any{"command": s.Config.Command, "args": s.Config.Args})
-			after, _ := json.Marshal(map[string]any{"command": wrapped.Command, "args": wrapped.Args})
+			var before, after []byte
+			if s.Config.Command != "" {
+				before, _ = json.Marshal(map[string]any{"command": s.Config.Command, "args": s.Config.Args})
+				after, _ = json.Marshal(map[string]any{"command": wrapped.Command, "args": wrapped.Args})
+			} else if s.Config.URL != "" {
+				before, _ = json.Marshal(map[string]any{"url": s.Config.URL})
+				afterMap := map[string]any{"url": wrapped.URL}
+				if wrapped.Type != "" {
+					afterMap["type"] = wrapped.Type
+				}
+				after, _ = json.Marshal(afterMap)
+			}
 			fmt.Printf("    %s:\n      before: %s\n      after:  %s\n\n", s.Name, before, after)
 		}
 
@@ -339,7 +349,14 @@ func parseMcpServer(m map[string]any) claudeMcpServer {
 }
 
 func isAlreadyProxied(srv claudeMcpServer) bool {
-	return strings.HasSuffix(srv.Command, "quint-proxy") || srv.Command == "quint"
+	if strings.HasSuffix(srv.Command, "quint-proxy") || srv.Command == "quint" {
+		return true
+	}
+	// HTTP servers proxied through localhost with quint port range
+	if srv.URL != "" && strings.HasPrefix(srv.URL, "http://localhost:17") {
+		return true
+	}
+	return false
 }
 
 func generateWrappedConfig(s detectedServer) *claudeMcpServer {
@@ -350,12 +367,34 @@ func generateWrappedConfig(s detectedServer) *claudeMcpServer {
 	self, _ := os.Executable()
 
 	if s.Config.Command != "" {
+		// Stdio MCP server — wrap with stdio proxy
 		return &claudeMcpServer{
 			Command: self,
 			Args:    append([]string{"--name", s.Name, "--"}, append([]string{s.Config.Command}, s.Config.Args...)...),
 		}
 	}
+	if s.Config.URL != "" {
+		// HTTP/SSE MCP server — rewrite URL to point to local http-proxy.
+		// User starts the proxy separately: quint-proxy http-proxy --name <name> --target <url> --port <port>
+		port := 17100 + hashPort(s.Name)
+		return &claudeMcpServer{
+			URL:  fmt.Sprintf("http://localhost:%d", port),
+			Type: s.Config.Type,
+		}
+	}
 	return nil
+}
+
+// hashPort generates a stable port offset (0-899) from a server name.
+func hashPort(name string) int {
+	h := 0
+	for _, c := range name {
+		h = h*31 + int(c)
+	}
+	if h < 0 {
+		h = -h
+	}
+	return h % 900
 }
 
 func extractOriginalCommand(cfg claudeMcpServer) (string, []string) {
@@ -376,17 +415,46 @@ func applyToClaudeConfig(servers []detectedServer) int {
 	json.Unmarshal(data, &config)
 
 	applied := 0
-	mcpServers, _ := config["mcpServers"].(map[string]any)
 	for _, s := range servers {
 		wrapped := generateWrappedConfig(s)
 		if wrapped == nil {
 			continue
 		}
-		wrappedMap := map[string]any{"command": wrapped.Command, "args": wrapped.Args}
+		var wrappedMap map[string]any
+		if wrapped.Command != "" {
+			wrappedMap = map[string]any{"command": wrapped.Command, "args": wrapped.Args}
+		} else if wrapped.URL != "" {
+			wrappedMap = map[string]any{"url": wrapped.URL}
+			if wrapped.Type != "" {
+				wrappedMap["type"] = wrapped.Type
+			}
+		}
+		if wrappedMap == nil {
+			continue
+		}
+
+		// Try top-level mcpServers first
+		mcpServers, _ := config["mcpServers"].(map[string]any)
 		if mcpServers != nil {
 			if _, ok := mcpServers[s.Name]; ok {
 				mcpServers[s.Name] = wrappedMap
 				applied++
+				continue
+			}
+		}
+
+		// Try project-level mcpServers
+		if projects, ok := config["projects"].(map[string]any); ok {
+			for _, proj := range projects {
+				projMap, _ := proj.(map[string]any)
+				projServers, _ := projMap["mcpServers"].(map[string]any)
+				if projServers != nil {
+					if _, ok := projServers[s.Name]; ok {
+						projServers[s.Name] = wrappedMap
+						applied++
+						break
+					}
+				}
 			}
 		}
 	}

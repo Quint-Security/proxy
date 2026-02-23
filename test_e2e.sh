@@ -293,6 +293,80 @@ check "default fail_mode is closed" 'closed' "$FAIL_MODE"
 
 # =============================================
 echo ""
+echo "--- Test 13: Agent Identity ---"
+
+# Create an agent with read-only scope
+CREATE_OUT=$($PROXY agent create e2e-reader --scopes tools:read --type test --policy "$TMPDIR/policy.json" 2>&1)
+check "agent create succeeds" 'Agent created' "$CREATE_OUT"
+
+AGENT_KEY=$(echo "$CREATE_OUT" | grep "API Key" | awk '{print $NF}')
+check "agent has API key" 'qk_' "$AGENT_KEY"
+
+# List agents
+LIST_OUT=$($PROXY agent list --policy "$TMPDIR/policy.json" 2>&1)
+check "agent list shows e2e-reader" 'e2e-reader' "$LIST_OUT"
+
+# =============================================
+echo ""
+echo "--- Test 14: RBAC Scope Enforcement (stdio) ---"
+
+# Agent with tools:read can read
+OUTPUT=$(echo '{"jsonrpc":"2.0","id":300,"method":"tools/call","params":{"name":"ReadFile","arguments":{"path":"/tmp/test"}}}' | $PROXY --name scope-test --policy "$TMPDIR/policy.json" --agent e2e-reader -- node "$TMPDIR/mcp-server.js" 2>/dev/null)
+check "agent with tools:read can ReadFile" 'ReadFile executed successfully' "$OUTPUT"
+
+# Agent with tools:read cannot write
+OUTPUT=$(echo '{"jsonrpc":"2.0","id":301,"method":"tools/call","params":{"name":"WriteFile","arguments":{"path":"/tmp/test"}}}' | $PROXY --name scope-test --policy "$TMPDIR/policy.json" --agent e2e-reader -- node "$TMPDIR/mcp-server.js" 2>/dev/null)
+check "agent with tools:read denied WriteFile" 'insufficient scope' "$OUTPUT"
+
+# Agent with tools:read cannot delete
+OUTPUT=$(echo '{"jsonrpc":"2.0","id":302,"method":"tools/call","params":{"name":"DeleteFile","arguments":{"id":"x"}}}' | $PROXY --name scope-test --policy "$TMPDIR/policy.json" --agent e2e-reader -- node "$TMPDIR/mcp-server.js" 2>/dev/null)
+check "agent with tools:read denied DeleteFile" 'insufficient scope' "$OUTPUT"
+
+# =============================================
+echo ""
+echo "--- Test 15: Agent Suspend & Revoke ---"
+
+$PROXY agent suspend e2e-reader --policy "$TMPDIR/policy.json" 2>&1 > /dev/null
+LIST_OUT=$($PROXY agent list --policy "$TMPDIR/policy.json" 2>&1)
+check "agent is suspended" 'suspended' "$LIST_OUT"
+
+# Suspended agent loses scoping but still works (degrades to anonymous)
+OUTPUT=$(echo '{"jsonrpc":"2.0","id":303,"method":"tools/call","params":{"name":"WriteFile","arguments":{"path":"/tmp"}}}' | $PROXY --name scope-test --policy "$TMPDIR/policy.json" --agent e2e-reader -- node "$TMPDIR/mcp-server.js" 2>&1)
+check "suspended agent exits with error" 'is suspended' "$OUTPUT"
+
+# =============================================
+echo ""
+echo "--- Test 16: Verify with Agent Entries ---"
+VERIFY_OUT=$($PROXY verify --all --policy "$TMPDIR/policy.json" 2>&1)
+check "verify all passes with agent entries" '0 invalid' "$VERIFY_OUT"
+check "verify chain intact" '0 broken' "$VERIFY_OUT"
+
+# =============================================
+echo ""
+echo "--- Test 17: Dashboard API ---"
+
+# Start dashboard in background
+$PROXY dashboard --policy "$TMPDIR/policy.json" --port 18199 --no-open &
+DASH_PID=$!
+sleep 2
+
+STATUS=$(curl -s http://localhost:18199/api/status 2>/dev/null || echo "FAIL")
+check "dashboard /api/status responds" 'total_entries' "$STATUS"
+
+AGENTS=$(curl -s http://localhost:18199/api/agents 2>/dev/null || echo "FAIL")
+check "dashboard /api/agents responds" 'e2e-reader' "$AGENTS"
+
+APPROVALS=$(curl -s http://localhost:18199/api/approvals 2>/dev/null || echo "FAIL")
+check "dashboard /api/approvals responds" 'pending' "$APPROVALS"
+
+HTML=$(curl -s http://localhost:18199/ 2>/dev/null | head -1)
+check "dashboard serves HTML" 'DOCTYPE' "$HTML"
+
+kill $DASH_PID 2>/dev/null
+wait $DASH_PID 2>/dev/null
+
+# =============================================
+echo ""
 echo "=========================================="
 echo "  Results: $PASS passed, $FAIL failed"
 echo "=========================================="

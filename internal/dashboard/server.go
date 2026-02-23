@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Quint-Security/quint-proxy/internal/approval"
@@ -28,6 +29,11 @@ type Server struct {
 	approvalDB *approval.DB
 	policy     intercept.PolicyConfig
 	dataDir    string
+
+	// SSE
+	sseClients   map[chan string]struct{}
+	sseClientsMu sync.Mutex
+	stopPoll     chan struct{}
 }
 
 // New creates a new dashboard server.
@@ -56,6 +62,8 @@ func New(dataDir string, policy intercept.PolicyConfig) (*Server, error) {
 		approvalDB: approvalDB,
 		policy:     policy,
 		dataDir:    dataDir,
+		sseClients: make(map[chan string]struct{}),
+		stopPoll:   make(chan struct{}),
 	}, nil
 }
 
@@ -71,6 +79,10 @@ func (s *Server) Start(port int) error {
 	mux.HandleFunc("/api/approvals", s.handleApprovals)
 	mux.HandleFunc("/api/approvals/", s.handleApprovalAction)
 	mux.HandleFunc("/api/policy", s.handlePolicy)
+	mux.HandleFunc("/api/events", s.handleSSE)
+
+	// Start polling for new audit entries
+	go s.pollAuditUpdates()
 
 	// Static files
 	sub, err := fs.Sub(staticFiles, "static")
@@ -92,6 +104,7 @@ func (s *Server) Start(port int) error {
 
 // Close cleans up resources.
 func (s *Server) Close() {
+	close(s.stopPoll)
 	if s.auditDB != nil {
 		s.auditDB.Close()
 	}
@@ -280,10 +293,16 @@ func (s *Server) handleApprovalAction(w http.ResponseWriter, r *http.Request) {
 
 	// Sign the decision
 	passphrase := os.Getenv("QUINT_PASSPHRASE")
-	sig := ""
-	if kp, err := crypto.EnsureKeyPair(s.dataDir, passphrase); err == nil {
-		decisionData := fmt.Sprintf("%s:%s", id, action)
-		sig, _ = crypto.SignData(decisionData, kp.PrivateKey)
+	kp, err := crypto.EnsureKeyPair(s.dataDir, passphrase)
+	if err != nil {
+		s.jsonErr(w, 500, "signing key not available: "+err.Error())
+		return
+	}
+	decisionData := fmt.Sprintf("%s:%s", id, action)
+	sig, err := crypto.SignData(decisionData, kp.PrivateKey)
+	if err != nil {
+		s.jsonErr(w, 500, "failed to sign decision: "+err.Error())
+		return
 	}
 
 	if err := s.approvalDB.Decide(id, approved, "dashboard", sig); err != nil {
@@ -301,4 +320,94 @@ func (s *Server) handlePolicy(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.jsonErr(w, 405, "use GET")
 	}
+}
+
+// --- SSE Live Updates ---
+
+func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	ch := make(chan string, 16)
+	s.sseClientsMu.Lock()
+	s.sseClients[ch] = struct{}{}
+	s.sseClientsMu.Unlock()
+
+	defer func() {
+		s.sseClientsMu.Lock()
+		delete(s.sseClients, ch)
+		s.sseClientsMu.Unlock()
+	}()
+
+	// Send initial connected event
+	total := s.auditDB.Count()
+	fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]any{"type": "connected", "total": total}))
+	flusher.Flush()
+
+	// Stream events until client disconnects
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(w, "data: %s\n\n", msg)
+			flusher.Flush()
+		}
+	}
+}
+
+func (s *Server) broadcast(msg string) {
+	s.sseClientsMu.Lock()
+	defer s.sseClientsMu.Unlock()
+	for ch := range s.sseClients {
+		select {
+		case ch <- msg:
+		default:
+			// Client too slow, skip
+		}
+	}
+}
+
+func (s *Server) pollAuditUpdates() {
+	lastCount := s.auditDB.Count()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopPoll:
+			return
+		case <-ticker.C:
+			current := s.auditDB.Count()
+			if current > lastCount {
+				delta := current - lastCount
+				entries, _ := s.auditDB.GetLast(delta)
+				lastCount = current
+
+				msg := mustJSON(map[string]any{
+					"type":    "new_entries",
+					"entries": entries,
+					"total":   current,
+				})
+				s.broadcast(msg)
+			}
+		}
+	}
+}
+
+func mustJSON(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
 }

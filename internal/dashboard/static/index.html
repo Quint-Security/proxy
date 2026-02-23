@@ -322,8 +322,32 @@ async function loadPolicy() {
   document.getElementById('policy-json').textContent = JSON.stringify(data, null, 2);
 }
 
+// SSE Live Updates
+let evtSource;
+function connectSSE() {
+  evtSource = new EventSource(API + '/api/events');
+  evtSource.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type === 'new_entries') {
+      // Refresh the active tab
+      const activeTab = document.querySelector('nav a.active');
+      if (activeTab) {
+        const tab = activeTab.dataset.tab;
+        if (tab === 'overview') loadOverview();
+        if (tab === 'audit') loadAudit();
+        if (tab === 'approvals') loadApprovals();
+      }
+    }
+  };
+  evtSource.onerror = () => {
+    evtSource.close();
+    setTimeout(connectSSE, 5000); // reconnect after 5s
+  };
+}
+
 // Init
 loadOverview();
+connectSSE();
 </script>
 </body>
 </html>

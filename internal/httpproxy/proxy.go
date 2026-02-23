@@ -84,12 +84,7 @@ func New(opts Options) (*Proxy, error) {
 
 	riskEngine := risk.NewEngine(&risk.EngineOpts{BehaviorDB: behaviorDB})
 
-	rlCfg := opts.Policy
-	rpm := 60
-	burst := 10
-	_ = rlCfg // rate_limit not in PolicyConfig struct yet, use defaults
-
-	rateLimiter := ratelimit.New(rpm, burst)
+	rateLimiter := ratelimit.New(opts.Policy.GetRateLimitRpm(), opts.Policy.GetRateLimitBurst())
 
 	var authDB *auth.DB
 	if opts.RequireAuth {
@@ -575,13 +570,17 @@ func (p *Proxy) handleApprovalAction(w http.ResponseWriter, r *http.Request) {
 
 	// Sign the decision
 	decisionData := fmt.Sprintf("%s:%s:%s", id, action, time.Now().UTC().Format(time.RFC3339))
-	signature := ""
-	if p.logger != nil {
-		// Use the proxy's signing key for the decision
-		sig, err := crypto.SignData(decisionData, p.getPrivateKey())
-		if err == nil {
-			signature = sig
-		}
+	privKey := p.getPrivateKey()
+	if privKey == "" {
+		w.WriteHeader(500)
+		json.NewEncoder(w).Encode(map[string]string{"error": "signing key not available"})
+		return
+	}
+	signature, err := crypto.SignData(decisionData, privKey)
+	if err != nil {
+		w.WriteHeader(500)
+		json.NewEncoder(w).Encode(map[string]string{"error": "failed to sign decision: " + err.Error()})
+		return
 	}
 
 	if err := p.approvalDB.Decide(id, approved, "operator", signature); err != nil {

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Quint-Security/quint-proxy/internal/audit"
@@ -103,6 +104,11 @@ func toPayload(e audit.Entry) entryPayload {
 	}
 }
 
+const (
+	maxRetries = 3
+	retryBase  = 500 * time.Millisecond
+)
+
 // Run performs a single sync: pushes new audit entries to the API.
 func Run(db *audit.DB, dataDir string, apiURL, apiKey string, verbose bool) (int, error) {
 	state := LoadState(dataDir)
@@ -122,18 +128,75 @@ func Run(db *audit.DB, dataDir string, apiURL, apiKey string, verbose bool) (int
 				len(entries), entries[0].ID, entries[len(entries)-1].ID)
 		}
 
-		ingested, err := pushBatch(apiURL, apiKey, entries)
+		ingested, err := pushBatchWithRetry(apiURL, apiKey, entries, verbose)
 		if err != nil {
 			return synced, fmt.Errorf("push batch: %w", err)
 		}
 		synced += ingested
 
-		state.LastSyncedID = entries[len(entries)-1].ID
+		// Only advance the cursor by the number actually ingested
+		if ingested > 0 && ingested <= len(entries) {
+			state.LastSyncedID = entries[ingested-1].ID
+		} else if ingested == 0 {
+			// Nothing ingested but no error — skip this batch to avoid infinite loop
+			// (e.g., all entries are duplicates)
+			state.LastSyncedID = entries[len(entries)-1].ID
+		}
 		state.LastSyncedAt = time.Now().UTC().Format(time.RFC3339)
 		SaveState(dataDir, state)
+
+		// If we didn't ingest the full batch, stop — partial success means
+		// some entries were rejected and we need to re-evaluate from the new cursor
+		if ingested < len(entries) && ingested > 0 {
+			if verbose {
+				fmt.Printf("  Partial batch: %d/%d ingested, will retry remaining on next sync\n", ingested, len(entries))
+			}
+			break
+		}
 	}
 
 	return synced, nil
+}
+
+func pushBatchWithRetry(apiURL, apiKey string, entries []audit.Entry, verbose bool) (int, error) {
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			wait := retryBase * time.Duration(1<<uint(attempt-1))
+			if verbose {
+				fmt.Printf("  Retry %d/%d after %v...\n", attempt, maxRetries, wait)
+			}
+			time.Sleep(wait)
+		}
+
+		ingested, err := pushBatch(apiURL, apiKey, entries)
+		if err == nil {
+			return ingested, nil
+		}
+		lastErr = err
+
+		// Only retry on transient errors (network, 5xx)
+		if !isRetryable(err) {
+			return 0, err
+		}
+	}
+	return 0, fmt.Errorf("failed after %d retries: %w", maxRetries, lastErr)
+}
+
+func isRetryable(err error) bool {
+	s := err.Error()
+	// Network errors are retryable
+	if !strings.Contains(s, "API returned") {
+		return true
+	}
+	// 5xx server errors are retryable
+	for _, code := range []string{"500", "502", "503", "504"} {
+		if strings.Contains(s, "API returned "+code) {
+			return true
+		}
+	}
+	// 4xx client errors are not retryable
+	return false
 }
 
 func pushBatch(apiURL, apiKey string, entries []audit.Entry) (int, error) {
@@ -142,10 +205,16 @@ func pushBatch(apiURL, apiKey string, entries []audit.Entry) (int, error) {
 		payloads[i] = toPayload(e)
 	}
 
-	body, _ := json.Marshal(map[string]any{"entries": payloads})
-	url := fmt.Sprintf("%s/v1/audit/entries", apiURL)
+	body, err := json.Marshal(map[string]any{"entries": payloads})
+	if err != nil {
+		return 0, fmt.Errorf("marshal entries: %w", err)
+	}
+	endpoint := fmt.Sprintf("%s/v1/audit/entries", apiURL)
 
-	req, _ := http.NewRequest("POST", url, bytes.NewReader(body))
+	req, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
+	if err != nil {
+		return 0, fmt.Errorf("create request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
