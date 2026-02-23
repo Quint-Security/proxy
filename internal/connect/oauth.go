@@ -34,6 +34,8 @@ type FlowOpts struct {
 	TokenURL     string
 	Scopes       []string
 	CallbackPort int
+	BasicAuth    bool              // Use Basic Auth for token exchange (Notion)
+	ExtraParams  map[string]string // Extra auth URL params
 }
 
 // RunOAuthFlow runs a full OAuth 2.0 PKCE authorization code flow.
@@ -70,6 +72,9 @@ func RunOAuthFlow(opts FlowOpts) (*TokenResult, error) {
 	if len(opts.Scopes) > 0 {
 		q.Set("scope", strings.Join(opts.Scopes, " "))
 	}
+	for k, v := range opts.ExtraParams {
+		q.Set(k, v)
+	}
 	authURL.RawQuery = q.Encode()
 
 	fmt.Printf("\nOpening browser for authorization...\n")
@@ -88,7 +93,7 @@ func RunOAuthFlow(opts FlowOpts) (*TokenResult, error) {
 
 	// Exchange code for tokens
 	fmt.Println("Exchanging authorization code for tokens...")
-	return exchangeCode(opts.TokenURL, code, codeVerifier, redirectURI, opts.ClientID, opts.ClientSecret)
+	return exchangeCode(opts.TokenURL, code, codeVerifier, redirectURI, opts.ClientID, opts.ClientSecret, opts.BasicAuth)
 }
 
 func startListener(fixedPort int) (net.Listener, error) {
@@ -150,20 +155,36 @@ func waitForCallback(listener net.Listener) (code, state string, err error) {
 	}
 }
 
-func exchangeCode(tokenURL, code, codeVerifier, redirectURI, clientID, clientSecret string) (*TokenResult, error) {
-	params := url.Values{
-		"grant_type":    {"authorization_code"},
-		"code":          {code},
-		"code_verifier": {codeVerifier},
-		"redirect_uri":  {redirectURI},
-		"client_id":     {clientID},
+func exchangeCode(tokenURL, code, codeVerifier, redirectURI, clientID, clientSecret string, basicAuth bool) (*TokenResult, error) {
+	body := map[string]string{
+		"grant_type":    "authorization_code",
+		"code":          code,
+		"redirect_uri":  redirectURI,
 	}
-	if clientSecret != "" {
-		params.Set("client_secret", clientSecret)
+	if codeVerifier != "" {
+		body["code_verifier"] = codeVerifier
 	}
 
-	req, _ := http.NewRequest("POST", tokenURL, strings.NewReader(params.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	var req *http.Request
+	if basicAuth {
+		// Notion-style: credentials in Basic Auth header, JSON body
+		jsonBody, _ := json.Marshal(body)
+		req, _ = http.NewRequest("POST", tokenURL, strings.NewReader(string(jsonBody)))
+		req.Header.Set("Content-Type", "application/json")
+		req.SetBasicAuth(clientID, clientSecret)
+	} else {
+		// Standard: credentials in POST body, form-encoded
+		params := url.Values{}
+		for k, v := range body {
+			params.Set(k, v)
+		}
+		params.Set("client_id", clientID)
+		if clientSecret != "" {
+			params.Set("client_secret", clientSecret)
+		}
+		req, _ = http.NewRequest("POST", tokenURL, strings.NewReader(params.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
 	req.Header.Set("Accept", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -171,17 +192,17 @@ func exchangeCode(tokenURL, code, codeVerifier, redirectURI, clientID, clientSec
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("token exchange failed (%d): %s", resp.StatusCode, body)
+		return nil, fmt.Errorf("token exchange failed (%d): %s", resp.StatusCode, respBody)
 	}
 
 	// Try JSON first, then form-encoded (GitHub returns form-encoded)
 	var result TokenResult
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := json.Unmarshal(respBody, &result); err != nil {
 		// Try form-encoded
-		vals, _ := url.ParseQuery(string(body))
+		vals, _ := url.ParseQuery(string(respBody))
 		result.AccessToken = vals.Get("access_token")
 		result.RefreshToken = vals.Get("refresh_token")
 		result.Scope = vals.Get("scope")
@@ -192,7 +213,7 @@ func exchangeCode(tokenURL, code, codeVerifier, redirectURI, clientID, clientSec
 	}
 
 	if result.AccessToken == "" {
-		return nil, fmt.Errorf("no access_token in response: %s", body)
+		return nil, fmt.Errorf("no access_token in response: %s", respBody)
 	}
 
 	return &result, nil

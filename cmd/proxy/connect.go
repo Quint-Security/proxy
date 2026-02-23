@@ -153,11 +153,11 @@ func runConnectAdd(args []string) {
 	// Auto-fill from known provider if no flags given
 	provider := connect.GetProvider(service)
 	if provider != nil {
-		if clientID == "" && provider.ClientID != "" {
-			clientID = provider.ClientID
+		if clientID == "" {
+			clientID = provider.ResolveClientID()
 		}
-		if clientSecret == "" && provider.ClientSecret != "" {
-			clientSecret = provider.ClientSecret
+		if clientSecret == "" {
+			clientSecret = provider.ResolveClientSecret()
 		}
 		if authURL == "" {
 			authURL = provider.AuthURL
@@ -184,6 +184,13 @@ func runConnectAdd(args []string) {
 			scopeList = provider.DefaultScopes
 		}
 
+		var basicAuth bool
+		var extraParams map[string]string
+		if provider != nil {
+			basicAuth = provider.BasicAuth
+			extraParams = provider.ExtraParams
+		}
+
 		result, err := connect.RunOAuthFlow(connect.FlowOpts{
 			ClientID:     clientID,
 			ClientSecret: clientSecret,
@@ -191,6 +198,8 @@ func runConnectAdd(args []string) {
 			TokenURL:     tokenURL,
 			Scopes:       scopeList,
 			CallbackPort: callbackPort,
+			BasicAuth:    basicAuth,
+			ExtraParams:  extraParams,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "OAuth flow failed: %v\n", err)

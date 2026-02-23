@@ -1,37 +1,67 @@
 package connect
 
-import "strings"
+import (
+	"os"
+	"strings"
+)
 
 // Provider defines a known OAuth provider.
 type Provider struct {
-	Name          string   `json:"name"`
-	ClientID      string   `json:"client_id,omitempty"`
-	ClientSecret  string   `json:"client_secret,omitempty"`
-	AuthURL       string   `json:"auth_url"`
-	TokenURL      string   `json:"token_url"`
-	CallbackPort  int      `json:"callback_port,omitempty"`
-	DefaultScopes []string `json:"default_scopes"`
-	Docs          string   `json:"docs"`
+	Name            string            `json:"name"`
+	ClientID        string            `json:"client_id,omitempty"`
+	ClientIDEnv     string            `json:"client_id_env,omitempty"`
+	ClientSecretEnv string            `json:"client_secret_env,omitempty"`
+	AuthURL         string            `json:"auth_url"`
+	TokenURL        string            `json:"token_url"`
+	CallbackPort    int               `json:"callback_port,omitempty"`
+	DefaultScopes   []string          `json:"default_scopes"`
+	Docs            string            `json:"docs"`
+	BasicAuth       bool              `json:"basic_auth,omitempty"`
+	ExtraParams     map[string]string `json:"extra_params,omitempty"`
+}
+
+// ResolveClientID returns the client ID (direct value or from env).
+func (p Provider) ResolveClientID() string {
+	if p.ClientID != "" {
+		return p.ClientID
+	}
+	if p.ClientIDEnv != "" {
+		return os.Getenv(p.ClientIDEnv)
+	}
+	return ""
+}
+
+// ResolveClientSecret returns the client secret from env.
+func (p Provider) ResolveClientSecret() string {
+	if p.ClientSecretEnv != "" {
+		return os.Getenv(p.ClientSecretEnv)
+	}
+	return ""
 }
 
 // Providers is the map of known OAuth providers.
 var Providers = map[string]Provider{
 	"github": {
-		Name:          "GitHub",
-		ClientID:      "Ov23liVPN35pZFQ7L7Rl",
-		ClientSecret:  "681de8ad98acad13193e1fe93f072f67645aa3c9",
-		AuthURL:       "https://github.com/login/oauth/authorize",
-		TokenURL:      "https://github.com/login/oauth/access_token",
-		CallbackPort:  7890,
-		DefaultScopes: []string{"repo", "read:org"},
-		Docs:          "https://github.com/settings/developers",
+		Name:            "GitHub",
+		ClientID:        "Ov23liVPN35pZFQ7L7Rl",
+		ClientSecretEnv: "QUINT_GITHUB_CLIENT_SECRET",
+		AuthURL:         "https://github.com/login/oauth/authorize",
+		TokenURL:        "https://github.com/login/oauth/access_token",
+		CallbackPort:    7890,
+		DefaultScopes:   []string{"repo", "read:org"},
+		Docs:            "https://github.com/settings/developers",
 	},
 	"notion": {
-		Name:          "Notion",
-		AuthURL:       "https://api.notion.com/v1/oauth/authorize",
-		TokenURL:      "https://api.notion.com/v1/oauth/token",
-		DefaultScopes: []string{},
-		Docs:          "https://www.notion.so/my-integrations",
+		Name:            "Notion",
+		ClientIDEnv:     "QUINT_NOTION_CLIENT_ID",
+		ClientSecretEnv: "QUINT_NOTION_CLIENT_SECRET",
+		AuthURL:         "https://api.notion.com/v1/oauth/authorize",
+		TokenURL:        "https://api.notion.com/v1/oauth/token",
+		CallbackPort:    7890,
+		DefaultScopes:   []string{},
+		Docs:            "https://www.notion.so/my-integrations",
+		BasicAuth:       true,
+		ExtraParams:     map[string]string{"owner": "user"},
 	},
 	"slack": {
 		Name:          "Slack",
