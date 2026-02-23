@@ -5,8 +5,11 @@ import "strings"
 // Provider defines a known OAuth provider.
 type Provider struct {
 	Name          string   `json:"name"`
+	ClientID      string   `json:"client_id,omitempty"`
+	ClientSecret  string   `json:"client_secret,omitempty"`
 	AuthURL       string   `json:"auth_url"`
 	TokenURL      string   `json:"token_url"`
+	CallbackPort  int      `json:"callback_port,omitempty"`
 	DefaultScopes []string `json:"default_scopes"`
 	Docs          string   `json:"docs"`
 }
@@ -15,8 +18,11 @@ type Provider struct {
 var Providers = map[string]Provider{
 	"github": {
 		Name:          "GitHub",
+		ClientID:      "Ov23liVPN35pZFQ7L7Rl",
+		ClientSecret:  "681de8ad98acad13193e1fe93f072f67645aa3c9",
 		AuthURL:       "https://github.com/login/oauth/authorize",
 		TokenURL:      "https://github.com/login/oauth/access_token",
+		CallbackPort:  7890,
 		DefaultScopes: []string{"repo", "read:org"},
 		Docs:          "https://github.com/settings/developers",
 	},

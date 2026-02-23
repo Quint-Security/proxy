@@ -131,15 +131,28 @@ func runConnectAdd(args []string) {
 		return
 	}
 
-	if clientID != "" {
-		// OAuth PKCE flow
-		provider := connect.GetProvider(service)
-		if authURL == "" && provider != nil {
+	// Auto-fill from known provider if no flags given
+	provider := connect.GetProvider(service)
+	if provider != nil {
+		if clientID == "" && provider.ClientID != "" {
+			clientID = provider.ClientID
+		}
+		if clientSecret == "" && provider.ClientSecret != "" {
+			clientSecret = provider.ClientSecret
+		}
+		if authURL == "" {
 			authURL = provider.AuthURL
 		}
-		if tokenURL == "" && provider != nil {
+		if tokenURL == "" {
 			tokenURL = provider.TokenURL
 		}
+		if callbackPort == 0 && provider.CallbackPort > 0 {
+			callbackPort = provider.CallbackPort
+		}
+	}
+
+	if clientID != "" {
+		// OAuth flow
 		if authURL == "" || tokenURL == "" {
 			fmt.Fprintf(os.Stderr, "Unknown provider %q. Specify --auth-url and --token-url.\n", service)
 			os.Exit(1)

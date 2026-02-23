@@ -44,7 +44,7 @@ func New(cfg *Config, opts GatewayOpts) (*Gateway, error) {
 		if serverCfg.IsHTTP() {
 			b = NewHTTPBackend(name, serverCfg, opts.CredStore)
 		} else {
-			b = NewStdioBackend(name, serverCfg)
+			b = NewStdioBackend(name, serverCfg, opts.CredStore)
 		}
 		g.backends[name] = b
 	}

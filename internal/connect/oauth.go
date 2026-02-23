@@ -162,7 +162,10 @@ func exchangeCode(tokenURL, code, codeVerifier, redirectURI, clientID, clientSec
 		params.Set("client_secret", clientSecret)
 	}
 
-	resp, err := http.Post(tokenURL, "application/x-www-form-urlencoded", strings.NewReader(params.Encode()))
+	req, _ := http.NewRequest("POST", tokenURL, strings.NewReader(params.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("token request failed: %w", err)
 	}

@@ -46,23 +46,25 @@ type Backend interface {
 
 // StdioBackend manages a child MCP server process via stdio.
 type StdioBackend struct {
-	name    string
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	stdout  *bufio.Scanner
-	tools   []Tool
-	mu      sync.Mutex
-	pending map[string]chan json.RawMessage
-	nextID  int64
-	config  ServerConfig
+	name      string
+	cmd       *exec.Cmd
+	stdin     io.WriteCloser
+	stdout    *bufio.Scanner
+	tools     []Tool
+	mu        sync.Mutex
+	pending   map[string]chan json.RawMessage
+	nextID    int64
+	config    ServerConfig
+	credStore *credential.Store
 }
 
 // NewStdioBackend creates a new stdio backend.
-func NewStdioBackend(name string, cfg ServerConfig) *StdioBackend {
+func NewStdioBackend(name string, cfg ServerConfig, credStore *credential.Store) *StdioBackend {
 	return &StdioBackend{
-		name:    name,
-		config:  cfg,
-		pending: make(map[string]chan json.RawMessage),
+		name:      name,
+		config:    cfg,
+		credStore: credStore,
+		pending:   make(map[string]chan json.RawMessage),
 	}
 }
 
@@ -72,9 +74,20 @@ func (b *StdioBackend) Start() error {
 	b.cmd = exec.Command(b.config.Command, b.config.Args...)
 	b.cmd.Stderr = os.Stderr
 
-	// Merge env
+	// Merge env, resolving credential placeholders
 	env := os.Environ()
 	for k, v := range b.config.Env {
+		if strings.HasPrefix(v, "__CREDENTIAL:") && strings.HasSuffix(v, "__") {
+			credName := v[13 : len(v)-2]
+			if b.credStore != nil {
+				if token, err := b.credStore.GetAccessToken(credName); err == nil && token != "" {
+					v = token
+					qlog.Info("  %s: resolved credential %q for env %s", b.name, credName, k)
+				} else {
+					qlog.Error("  %s: credential %q not found for env %s", b.name, credName, k)
+				}
+			}
+		}
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 	b.cmd.Env = env
