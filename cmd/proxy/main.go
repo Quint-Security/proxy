@@ -32,6 +32,9 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		// Primary commands
+		case "setup":
+			runSetup(os.Args[2:])
+			return
 		case "init":
 			runInit(os.Args[2:])
 			return
@@ -83,6 +86,9 @@ func main() {
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Quint — Security gateway for AI agents\n\n")
+		fmt.Fprintf(os.Stderr, "Getting started:\n")
+		fmt.Fprintf(os.Stderr, "  quint setup                 Interactive setup wizard (recommended)\n\n")
+		fmt.Fprintf(os.Stderr, "Commands:\n")
 		fmt.Fprintf(os.Stderr, "  quint init                  Detect MCP servers, generate keys, create config\n")
 		fmt.Fprintf(os.Stderr, "  quint start                 Run the gateway (all servers proxied through Quint)\n")
 		fmt.Fprintf(os.Stderr, "  quint connect <provider>    Connect an OAuth service (github, notion, sentry)\n")
