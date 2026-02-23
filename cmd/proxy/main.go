@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/Quint-Security/quint-proxy/internal/auth"
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
 	qlog "github.com/Quint-Security/quint-proxy/internal/log"
 	"github.com/Quint-Security/quint-proxy/internal/relay"
@@ -21,7 +22,7 @@ type riskResult struct {
 }
 
 // Function type aliases used across phases.
-type logEntryFunc func(serverName, direction, method, messageID, toolName, argsJSON, respJSON string, verdict intercept.Verdict, riskScore *int, riskLevel *string)
+type logEntryFunc func(serverName, direction, method, messageID, toolName, argsJSON, respJSON string, verdict string, riskScore *int, riskLevel *string)
 type scoreFunc func(toolName, argsJSON, subjectID string) *riskResult
 type evalFunc func(score int) string
 type revokeFunc func(subjectID string) bool
@@ -36,6 +37,18 @@ func main() {
 		case "init":
 			runInit(os.Args[2:])
 			return
+		case "agent":
+			runAgent(os.Args[2:])
+			return
+		case "approvals":
+			runApprovals(os.Args[2:])
+			return
+		case "approve":
+			runApprove(os.Args[2:])
+			return
+		case "deny":
+			runDeny(os.Args[2:])
+			return
 		case "--version", "version":
 			fmt.Println(version)
 			return
@@ -45,11 +58,15 @@ func main() {
 	// Default: stdio proxy mode
 	serverName := flag.String("name", "", "MCP server name (used in audit log)")
 	policyPath := flag.String("policy", "", "Path to policy.json or directory containing it")
+	agentName := flag.String("agent", "", "Agent name for identity resolution (or set QUINT_AGENT)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage:\n")
-		fmt.Fprintf(os.Stderr, "  quint-proxy --name <server> [--policy <path>] -- <command> [args...]   (stdio proxy)\n")
+		fmt.Fprintf(os.Stderr, "  quint-proxy --name <server> [--policy <path>] [--agent <name>] -- <command> [args...]   (stdio proxy)\n")
 		fmt.Fprintf(os.Stderr, "  quint-proxy http-proxy --name <server> --target <url> [--port <port>]  (HTTP proxy)\n")
+		fmt.Fprintf(os.Stderr, "  quint-proxy agent <create|list|suspend|revoke> [options]               (manage agents)\n")
+		fmt.Fprintf(os.Stderr, "  quint-proxy approvals                                                 (list pending approvals)\n")
+		fmt.Fprintf(os.Stderr, "  quint-proxy approve <id> / deny <id>                                  (decide approval)\n")
 		fmt.Fprintf(os.Stderr, "  quint-proxy init [--role <preset>] [--apply] [--revert]                (setup wizard)\n\n")
 		flag.PrintDefaults()
 	}
@@ -78,8 +95,31 @@ func main() {
 	dataDir := intercept.ResolveDataDir(policy.DataDir)
 	qlog.Info("starting proxy for %q (data_dir=%s)", *serverName, dataDir)
 
+	// Resolve agent identity for stdio mode
+	resolvedAgent := *agentName
+	if resolvedAgent == "" {
+		resolvedAgent = os.Getenv("QUINT_AGENT")
+	}
+
+	var agentIdentity *auth.Identity
+	if resolvedAgent != "" {
+		authDB, err := auth.OpenDB(dataDir)
+		if err != nil {
+			qlog.Error("failed to open auth db for agent resolution: %v", err)
+		} else {
+			identity, err := authDB.ResolveAgentByName(resolvedAgent)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "quint: %v\n", err)
+				os.Exit(1)
+			}
+			agentIdentity = identity
+			cleanupFuncs = append(cleanupFuncs, func() { authDB.Close() })
+			qlog.Info("running as agent %q (%s, scopes=%v)", identity.AgentName, identity.AgentID, identity.Scopes)
+		}
+	}
+
 	// Initialize with stubs — phases replace these
-	var logEntry logEntryFunc = func(_, _, _, _, _, _, _ string, _ intercept.Verdict, _ *int, _ *string) {}
+	var logEntry logEntryFunc = func(_, _, _, _, _, _, _ string, _ string, _ *int, _ *string) {}
 	var scoreTool scoreFunc = func(_, _, _ string) *riskResult { return nil }
 	var evalRisk evalFunc = func(_ int) string { return "allow" }
 	var revoke revokeFunc = func(_ string) bool { return false }
@@ -94,10 +134,10 @@ func main() {
 	sn := *serverName
 	callbacks := relay.Callbacks{
 		OnParentMessage: func(line string) string {
-			return handleParentMessage(line, sn, policy, logEntry, scoreTool, evalRisk, revoke)
+			return handleParentMessage(line, sn, policy, logEntry, scoreTool, evalRisk, revoke, agentIdentity)
 		},
 		OnChildMessage: func(line string) string {
-			return handleChildMessage(line, sn, logEntry)
+			return handleChildMessage(line, sn, logEntry, agentIdentity)
 		},
 	}
 
@@ -127,6 +167,7 @@ func handleParentMessage(
 	scoreTool scoreFunc,
 	evalRisk evalFunc,
 	revoke revokeFunc,
+	identity *auth.Identity,
 ) (out string) {
 	// On panic: forward (fail-open) or drop (fail-closed) depending on policy
 	failMode := policy.GetFailMode()
@@ -144,13 +185,18 @@ func handleParentMessage(
 
 	result := intercept.InspectRequest(line, serverName, policy)
 
+	subjectID := "anonymous"
+	if identity != nil {
+		subjectID = identity.SubjectID
+	}
+
 	if result.ToolName == "" || result.Verdict == intercept.VerdictDeny {
-		logEntry(serverName, "request", result.Method, result.MessageID, result.ToolName, result.ArgumentsJson, "", result.Verdict, nil, nil)
+		logEntry(serverName, "request", result.Method, result.MessageID, result.ToolName, result.ArgumentsJson, "", string(result.Verdict), nil, nil)
 
 		if result.Verdict == intercept.VerdictDeny {
 			denyResp := intercept.BuildDenyResponse(result.RawID)
 			qlog.Info("denied %s on %s", result.ToolName, serverName)
-			logEntry(serverName, "response", result.Method, result.MessageID, result.ToolName, "", denyResp, intercept.VerdictDeny, nil, nil)
+			logEntry(serverName, "response", result.Method, result.MessageID, result.ToolName, "", denyResp, string(intercept.VerdictDeny), nil, nil)
 			os.Stdout.WriteString(denyResp + "\n")
 			return ""
 		}
@@ -159,8 +205,18 @@ func handleParentMessage(
 		return line
 	}
 
+	// Scope enforcement (agents only, after policy check)
+	if requiredScope, ok := auth.EnforceScope(identity, result.ToolName); !ok {
+		denyResp := intercept.BuildScopeDenyResponse(result.RawID, result.ToolName, requiredScope)
+		qlog.Info("scope-denied %s for agent %s (requires %s)", result.ToolName, identity.AgentName, requiredScope)
+		logEntry(serverName, "request", result.Method, result.MessageID, result.ToolName, result.ArgumentsJson, "", "scope_denied", nil, nil)
+		logEntry(serverName, "response", result.Method, result.MessageID, result.ToolName, "", denyResp, "scope_denied", nil, nil)
+		os.Stdout.WriteString(denyResp + "\n")
+		return ""
+	}
+
 	// Tool call — score risk
-	risk := scoreTool(result.ToolName, result.ArgumentsJson, "anonymous")
+	risk := scoreTool(result.ToolName, result.ArgumentsJson, subjectID)
 	var riskScore *int
 	var riskLevel *string
 	if risk != nil {
@@ -168,24 +224,32 @@ func handleParentMessage(
 		riskLevel = &risk.level
 	}
 
-	logEntry(serverName, "request", result.Method, result.MessageID, result.ToolName, result.ArgumentsJson, "", result.Verdict, riskScore, riskLevel)
+	logEntry(serverName, "request", result.Method, result.MessageID, result.ToolName, result.ArgumentsJson, "", string(result.Verdict), riskScore, riskLevel)
 
 	if risk != nil {
 		action := evalRisk(risk.score)
 		if action == "deny" {
 			denyResp := intercept.BuildDenyResponse(result.RawID)
 			qlog.Warn("risk-denied %s (score=%d, level=%s)", result.ToolName, risk.score, risk.level)
-			logEntry(serverName, "response", result.Method, result.MessageID, result.ToolName, "", denyResp, intercept.VerdictDeny, riskScore, riskLevel)
+			logEntry(serverName, "response", result.Method, result.MessageID, result.ToolName, "", denyResp, string(intercept.VerdictDeny), riskScore, riskLevel)
 			os.Stdout.WriteString(denyResp + "\n")
 			return ""
 		}
 		if action == "flag" {
+			// In stdio mode, flagged calls use fail_mode (no approval hold)
 			qlog.Warn("high-risk %s (score=%d, level=%s)", result.ToolName, risk.score, risk.level)
+			if failMode == "closed" {
+				denyResp := intercept.BuildDenyResponse(result.RawID)
+				qlog.Warn("flag-denied %s in stdio mode (fail_mode=closed)", result.ToolName)
+				logEntry(serverName, "response", result.Method, result.MessageID, result.ToolName, "", denyResp, "flag_denied", riskScore, riskLevel)
+				os.Stdout.WriteString(denyResp + "\n")
+				return ""
+			}
 		}
 	}
 
-	if revoke("anonymous") {
-		qlog.Warn("repeated high-risk actions detected - consider revoking agent credentials")
+	if revoke(subjectID) {
+		qlog.Warn("repeated high-risk actions detected - consider revoking agent credentials for %s", subjectID)
 	}
 
 	if risk != nil {
@@ -197,7 +261,7 @@ func handleParentMessage(
 }
 
 // handleChildMessage processes a response from the MCP server heading to the AI agent.
-func handleChildMessage(line string, serverName string, logEntry logEntryFunc) string {
+func handleChildMessage(line string, serverName string, logEntry logEntryFunc, _ *auth.Identity) string {
 	defer func() {
 		if r := recover(); r != nil {
 			qlog.Error("panic in child message handler: %v", r)
@@ -205,7 +269,7 @@ func handleChildMessage(line string, serverName string, logEntry logEntryFunc) s
 	}()
 
 	method, msgID, respJSON := intercept.InspectResponse(line)
-	logEntry(serverName, "response", method, msgID, "", "", respJSON, intercept.VerdictPassthrough, nil, nil)
+	logEntry(serverName, "response", method, msgID, "", "", respJSON, string(intercept.VerdictPassthrough), nil, nil)
 	return line
 }
 

@@ -91,11 +91,13 @@ func writeValue(b *strings.Builder, v any) error {
 // BuildSignableObject constructs the map to be canonicalized for signing.
 // The proxy always includes risk_score and risk_level (even when null),
 // which differs from quint-api's BuildSignableObject that conditionally omits them.
+// agent_id and agent_name are included when provided (nil otherwise).
 func BuildSignableObject(
 	timestamp, serverName, direction, method string,
 	messageID, toolName, argumentsJSON, responseJSON *string,
 	verdict, policyHash, prevHash, nonce, publicKey string,
 	riskScore *int, riskLevel *string,
+	agentID, agentName *string,
 ) map[string]any {
 	obj := map[string]any{
 		"timestamp":      timestamp,
@@ -113,6 +115,8 @@ func BuildSignableObject(
 		"public_key":     publicKey,
 		"risk_score":     ptrToAny(riskScore),
 		"risk_level":     ptrToAny(riskLevel),
+		"agent_id":       ptrToAny(agentID),
+		"agent_name":     ptrToAny(agentName),
 	}
 	return obj
 }

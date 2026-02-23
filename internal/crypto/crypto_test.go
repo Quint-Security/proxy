@@ -144,6 +144,7 @@ func TestBuildSignableObjectAlwaysIncludesRiskFields(t *testing.T) {
 		nil, nil, nil, nil,
 		"allow", "hash", "", "nonce", "pubkey",
 		nil, nil,
+		nil, nil,
 	)
 
 	// risk_score and risk_level must be present (as null)
@@ -158,5 +159,13 @@ func TestBuildSignableObjectAlwaysIncludesRiskFields(t *testing.T) {
 	}
 	if obj["risk_level"] != nil {
 		t.Errorf("risk_level should be nil, got %v", obj["risk_level"])
+	}
+
+	// agent_id and agent_name must be present (as null)
+	if _, ok := obj["agent_id"]; !ok {
+		t.Error("agent_id missing from signable object")
+	}
+	if _, ok := obj["agent_name"]; !ok {
+		t.Error("agent_name missing from signable object")
 	}
 }

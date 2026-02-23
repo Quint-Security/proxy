@@ -70,12 +70,22 @@ type RiskConfig struct {
 
 // PolicyConfig is the top-level policy file structure.
 type PolicyConfig struct {
-	Version  int            `json:"version"`
-	DataDir  string         `json:"data_dir"`
-	LogLevel string         `json:"log_level"`
-	FailMode string         `json:"fail_mode,omitempty"` // "open" or "closed" (default "closed")
-	Servers  []ServerPolicy `json:"servers"`
-	Risk     *RiskConfig    `json:"risk,omitempty"`
+	Version                int            `json:"version"`
+	DataDir                string         `json:"data_dir"`
+	LogLevel               string         `json:"log_level"`
+	FailMode               string         `json:"fail_mode,omitempty"` // "open" or "closed" (default "closed")
+	Servers                []ServerPolicy `json:"servers"`
+	Risk                   *RiskConfig    `json:"risk,omitempty"`
+	ApprovalRequired       bool           `json:"approval_required,omitempty"`
+	ApprovalTimeoutSeconds int            `json:"approval_timeout_seconds,omitempty"`
+}
+
+// GetApprovalTimeout returns the effective approval timeout in seconds, defaulting to 300.
+func (p PolicyConfig) GetApprovalTimeout() int {
+	if p.ApprovalTimeoutSeconds > 0 {
+		return p.ApprovalTimeoutSeconds
+	}
+	return 300
 }
 
 // GetFailMode returns the effective fail mode, defaulting to "closed".

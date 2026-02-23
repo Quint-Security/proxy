@@ -87,3 +87,27 @@ func BuildDenyResponse(rawID json.RawMessage) string {
 	resp := `{"jsonrpc":"2.0","id":` + idPart + `,"error":{"code":-32600,"message":"Quint: tool call denied by policy"}}`
 	return resp
 }
+
+// BuildScopeDenyResponse creates a JSON-RPC error response for an insufficient-scope denial.
+func BuildScopeDenyResponse(rawID json.RawMessage, toolName, requiredScope string) string {
+	idPart := "null"
+	if rawID != nil && len(rawID) > 0 {
+		idPart = string(rawID)
+	}
+
+	msg := "Quint: insufficient scope for " + toolName + " (requires " + requiredScope + ")"
+	resp := `{"jsonrpc":"2.0","id":` + idPart + `,"error":{"code":-32600,"message":"` + msg + `"}}`
+	return resp
+}
+
+// BuildApprovalPendingResponse creates a JSON-RPC response indicating approval is pending.
+func BuildApprovalPendingResponse(rawID json.RawMessage, approvalID string) string {
+	idPart := "null"
+	if rawID != nil && len(rawID) > 0 {
+		idPart = string(rawID)
+	}
+
+	msg := "Quint: approval required. ID: " + approvalID + ". Re-submit with X-Quint-Approval header after approval."
+	resp := `{"jsonrpc":"2.0","id":` + idPart + `,"error":{"code":-32001,"message":"` + msg + `"}}`
+	return resp
+}
