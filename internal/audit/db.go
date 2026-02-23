@@ -186,6 +186,93 @@ func (d *DB) GetLastSignature() string {
 	return sig
 }
 
+// QueryOpts controls audit log queries.
+type QueryOpts struct {
+	Limit      int
+	Offset     int
+	Verdict    string
+	ToolName   string
+	ServerName string
+	AgentName  string
+}
+
+// Query returns audit log entries matching the given filters.
+func (d *DB) Query(opts QueryOpts) ([]Entry, int, error) {
+	where := "1=1"
+	args := []any{}
+
+	if opts.Verdict != "" {
+		where += " AND verdict = ?"
+		args = append(args, opts.Verdict)
+	}
+	if opts.ToolName != "" {
+		where += " AND tool_name LIKE ?"
+		args = append(args, "%"+opts.ToolName+"%")
+	}
+	if opts.ServerName != "" {
+		where += " AND server_name = ?"
+		args = append(args, opts.ServerName)
+	}
+	if opts.AgentName != "" {
+		where += " AND agent_name = ?"
+		args = append(args, opts.AgentName)
+	}
+
+	// Count
+	var total int
+	d.db.QueryRow("SELECT COUNT(*) FROM audit_log WHERE "+where, args...).Scan(&total)
+
+	// Fetch
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	query := fmt.Sprintf(
+		"SELECT id, timestamp, server_name, direction, method, message_id, tool_name, arguments_json, response_json, verdict, risk_score, risk_level, policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name FROM audit_log WHERE %s ORDER BY id DESC LIMIT ? OFFSET ?",
+		where,
+	)
+	args = append(args, limit, opts.Offset)
+
+	rows, err := d.db.Query(query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var entries []Entry
+	for rows.Next() {
+		var e Entry
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.ServerName, &e.Direction, &e.Method, &e.MessageID, &e.ToolName, &e.ArgumentsJSON, &e.ResponseJSON, &e.Verdict, &e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce, &e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName); err != nil {
+			return nil, 0, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, total, nil
+}
+
+// Stats returns summary statistics for the audit log.
+func (d *DB) Stats() map[string]any {
+	stats := map[string]any{}
+
+	var total int
+	d.db.QueryRow("SELECT COUNT(*) FROM audit_log").Scan(&total)
+	stats["total_entries"] = total
+
+	var denied int
+	d.db.QueryRow("SELECT COUNT(*) FROM audit_log WHERE verdict IN ('deny', 'scope_denied', 'flag_denied')").Scan(&denied)
+	stats["denied"] = denied
+
+	var flagged int
+	d.db.QueryRow("SELECT COUNT(*) FROM audit_log WHERE risk_level = 'high' OR risk_level = 'critical'").Scan(&flagged)
+	stats["high_risk"] = flagged
+
+	var lastTimestamp string
+	d.db.QueryRow("SELECT timestamp FROM audit_log ORDER BY id DESC LIMIT 1").Scan(&lastTimestamp)
+	stats["last_entry"] = lastTimestamp
+
+	return stats
+}
+
 // Close closes the database.
 func (d *DB) Close() error {
 	return d.db.Close()

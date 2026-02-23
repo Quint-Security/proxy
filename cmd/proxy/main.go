@@ -31,11 +31,17 @@ func main() {
 	// Check for subcommands before flag parsing
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "http-proxy":
-			runHTTPProxy(os.Args[2:])
+		case "dashboard":
+			runDashboard(os.Args[2:])
+			return
+		case "status":
+			runStatus(os.Args[2:])
 			return
 		case "init":
 			runInit(os.Args[2:])
+			return
+		case "http-proxy":
+			runHTTPProxy(os.Args[2:])
 			return
 		case "agent":
 			runAgent(os.Args[2:])
@@ -61,13 +67,14 @@ func main() {
 	agentName := flag.String("agent", "", "Agent name for identity resolution (or set QUINT_AGENT)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage:\n")
-		fmt.Fprintf(os.Stderr, "  quint-proxy --name <server> [--policy <path>] [--agent <name>] -- <command> [args...]   (stdio proxy)\n")
-		fmt.Fprintf(os.Stderr, "  quint-proxy http-proxy --name <server> --target <url> [--port <port>]  (HTTP proxy)\n")
-		fmt.Fprintf(os.Stderr, "  quint-proxy agent <create|list|suspend|revoke> [options]               (manage agents)\n")
-		fmt.Fprintf(os.Stderr, "  quint-proxy approvals                                                 (list pending approvals)\n")
-		fmt.Fprintf(os.Stderr, "  quint-proxy approve <id> / deny <id>                                  (decide approval)\n")
-		fmt.Fprintf(os.Stderr, "  quint-proxy init [--role <preset>] [--apply] [--revert]                (setup wizard)\n\n")
+		fmt.Fprintf(os.Stderr, "Quint — RBAC & risk scoring for AI agents\n\n")
+		fmt.Fprintf(os.Stderr, "Commands:\n")
+		fmt.Fprintf(os.Stderr, "  quint-proxy init                  Setup wizard — detect agents, generate keys, create policy\n")
+		fmt.Fprintf(os.Stderr, "  quint-proxy dashboard             Open the web dashboard (agent management, audit, approvals)\n")
+		fmt.Fprintf(os.Stderr, "  quint-proxy status                Quick health check\n\n")
+		fmt.Fprintf(os.Stderr, "Proxy (used internally by init):\n")
+		fmt.Fprintf(os.Stderr, "  quint-proxy --name <server> [--agent <name>] -- <command> [args...]\n")
+		fmt.Fprintf(os.Stderr, "  quint-proxy http-proxy --name <server> --target <url> [--port <port>] [--auth]\n\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -125,7 +132,7 @@ func main() {
 	var revoke revokeFunc = func(_ string) bool { return false }
 
 	// Phase 2: Wire crypto + audit
-	initAudit(dataDir, policy, &logEntry)
+	initAudit(dataDir, policy, &logEntry, agentIdentity)
 
 	// Phase 3: Wire risk engine
 	initRisk(dataDir, policy, &scoreTool, &evalRisk, &revoke)

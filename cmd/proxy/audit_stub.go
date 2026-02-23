@@ -5,12 +5,13 @@ import (
 	"os"
 
 	"github.com/Quint-Security/quint-proxy/internal/audit"
+	"github.com/Quint-Security/quint-proxy/internal/auth"
 	"github.com/Quint-Security/quint-proxy/internal/crypto"
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
 	qlog "github.com/Quint-Security/quint-proxy/internal/log"
 )
 
-func initAudit(dataDir string, policy intercept.PolicyConfig, logEntry *logEntryFunc) {
+func initAudit(dataDir string, policy intercept.PolicyConfig, logEntry *logEntryFunc, agentIdentity *auth.Identity) {
 	passphrase := os.Getenv("QUINT_PASSPHRASE")
 	kp, err := crypto.EnsureKeyPair(dataDir, passphrase)
 	if err != nil {
@@ -32,6 +33,13 @@ func initAudit(dataDir string, policy intercept.PolicyConfig, logEntry *logEntry
 
 	logger := audit.NewLogger(db, kp.PrivateKey, kp.PublicKey, policyMap)
 
+	// Capture agent identity for the session lifetime
+	var agentID, agentName string
+	if agentIdentity != nil {
+		agentID = agentIdentity.AgentID
+		agentName = agentIdentity.AgentName
+	}
+
 	*logEntry = func(serverName, direction, method, messageID, toolName, argsJSON, respJSON string, verdict string, riskScore *int, riskLevel *string) {
 		logger.Log(audit.LogOpts{
 			ServerName:    serverName,
@@ -44,6 +52,8 @@ func initAudit(dataDir string, policy intercept.PolicyConfig, logEntry *logEntry
 			Verdict:       verdict,
 			RiskScore:     riskScore,
 			RiskLevel:     riskLevel,
+			AgentID:       agentID,
+			AgentName:     agentName,
 		})
 	}
 }
