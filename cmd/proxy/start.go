@@ -9,6 +9,7 @@ import (
 
 	"github.com/Quint-Security/quint-proxy/internal/audit"
 	"github.com/Quint-Security/quint-proxy/internal/auth"
+	"github.com/Quint-Security/quint-proxy/internal/credential"
 	"github.com/Quint-Security/quint-proxy/internal/crypto"
 	"github.com/Quint-Security/quint-proxy/internal/gateway"
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
@@ -102,12 +103,23 @@ func runStart(args []string) {
 		}
 	}
 
+	// Open credential store for HTTP backends
+	encKey := credential.DeriveEncryptionKey(passphrase, kp.PrivateKey)
+	credStore, err := credential.OpenStore(dataDir, encKey)
+	if err != nil {
+		qlog.Error("credential store unavailable: %v (HTTP backends won't have auth)", err)
+	}
+	if credStore != nil {
+		defer credStore.Close()
+	}
+
 	// Create and start gateway
 	gw, err := gateway.New(cfg, gateway.GatewayOpts{
 		Policy:     policy,
 		Logger:     logger,
 		RiskEngine: riskEngine,
 		Identity:   identity,
+		CredStore:  credStore,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create gateway: %v\n", err)

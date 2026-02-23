@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Quint-Security/quint-proxy/internal/credential"
 	qlog "github.com/Quint-Security/quint-proxy/internal/log"
 )
 
@@ -282,19 +283,21 @@ func (b *StdioBackend) listTools() error {
 
 // HTTPBackend connects to a remote HTTP MCP server.
 type HTTPBackend struct {
-	name    string
-	config  ServerConfig
-	tools   []Tool
-	client  *http.Client
-	session string // Mcp-Session header
+	name      string
+	config    ServerConfig
+	tools     []Tool
+	client    *http.Client
+	session   string // Mcp-Session header
+	credStore *credential.Store
 }
 
 // NewHTTPBackend creates a new HTTP backend.
-func NewHTTPBackend(name string, cfg ServerConfig) *HTTPBackend {
+func NewHTTPBackend(name string, cfg ServerConfig, credStore *credential.Store) *HTTPBackend {
 	return &HTTPBackend{
-		name:   name,
-		config: cfg,
-		client: &http.Client{Timeout: 60 * time.Second},
+		name:      name,
+		config:    cfg,
+		client:    &http.Client{Timeout: 60 * time.Second},
+		credStore: credStore,
 	}
 }
 
@@ -386,6 +389,13 @@ func (b *HTTPBackend) post(body any) (json.RawMessage, error) {
 	// Add configured headers (auth tokens, etc.)
 	for k, v := range b.config.Headers {
 		req.Header.Set(k, v)
+	}
+
+	// Pull token from credential store if available
+	if b.credStore != nil && req.Header.Get("Authorization") == "" {
+		if token, err := b.credStore.GetAccessToken(b.name); err == nil && token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
 	}
 
 	// Include session header if we have one

@@ -9,6 +9,7 @@ import (
 
 	"github.com/Quint-Security/quint-proxy/internal/audit"
 	"github.com/Quint-Security/quint-proxy/internal/auth"
+	"github.com/Quint-Security/quint-proxy/internal/credential"
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
 	qlog "github.com/Quint-Security/quint-proxy/internal/log"
 	"github.com/Quint-Security/quint-proxy/internal/risk"
@@ -41,7 +42,7 @@ func New(cfg *Config, opts GatewayOpts) (*Gateway, error) {
 	for name, serverCfg := range cfg.Servers {
 		var b Backend
 		if serverCfg.IsHTTP() {
-			b = NewHTTPBackend(name, serverCfg)
+			b = NewHTTPBackend(name, serverCfg, opts.CredStore)
 		} else {
 			b = NewStdioBackend(name, serverCfg)
 		}
@@ -57,6 +58,7 @@ type GatewayOpts struct {
 	Logger     *audit.Logger
 	RiskEngine *risk.Engine
 	Identity   *auth.Identity
+	CredStore  *credential.Store
 }
 
 // Start initializes all backends and builds the tool index.
