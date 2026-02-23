@@ -47,10 +47,13 @@ if (mode === 'decrypt') {
 
 func hasNodeDeps(t *testing.T) string {
 	t.Helper()
-	cliRoot := "/Users/amerabbadi/Quint/quint-cli"
+	cliRoot := os.Getenv("QUINT_CLI_ROOT")
+	if cliRoot == "" {
+		t.Skip("QUINT_CLI_ROOT not set, skipping interop test")
+	}
 	distPath := filepath.Join(cliRoot, "packages", "core", "dist", "crypto.js")
 	if _, err := os.Stat(distPath); err != nil {
-		t.Skipf("TS CLI not built, skipping interop test: %v", err)
+		t.Skipf("TS CLI not built at %s, skipping interop test: %v", cliRoot, err)
 	}
 	return cliRoot
 }

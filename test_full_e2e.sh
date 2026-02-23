@@ -4,8 +4,9 @@ set -e
 # Full end-to-end test: proxy → audit → verify → sync → API
 # Tests the entire Quint pipeline from tool call to control plane.
 
-PROXY="/Users/amerabbadi/Quint/quint-proxy/quint-proxy"
-QUINT_CLI="node /Users/amerabbadi/Quint/quint-cli/packages/cli/dist/index.js"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROXY="${QUINT_PROXY_BIN:-$SCRIPT_DIR/quint-proxy}"
+QUINT_CLI="${QUINT_CLI_CMD:-node ${QUINT_CLI_ROOT:-$SCRIPT_DIR/../quint-cli}/packages/cli/dist/index.js}"
 API_URL="http://localhost:8080"
 API_KEY="qk_c11cf33a7dbeb27591e73eadeb0d6433e56b4b98564dac43c14f04e12aec4edd"
 TMPDIR=$(mktemp -d)

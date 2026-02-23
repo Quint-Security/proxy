@@ -169,7 +169,7 @@ check "ReadFile has risk_level=low" 'low' "$RISK_ENTRY"
 echo ""
 echo "--- Test 5: Signature Verification ---"
 # Verify all entries from our test
-VERIFY_OUTPUT=$(node /Users/amerabbadi/Quint/quint-cli/packages/cli/dist/index.js verify --all --chain 2>&1 || true)
+VERIFY_OUTPUT=$(${QUINT_CLI:-node ${QUINT_CLI_ROOT:-$(cd "$(dirname "$0")/.." && pwd)/quint-cli}/packages/cli/dist/index.js} verify --all --chain 2>&1 || true)
 # Extract just the summary lines
 SIG_LINE=$(echo "$VERIFY_OUTPUT" | grep "Signatures:" | head -1)
 CHAIN_LINE=$(echo "$VERIFY_OUTPUT" | grep "Chain:" | head -1)
