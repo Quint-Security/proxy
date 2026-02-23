@@ -3,151 +3,267 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Quint Dashboard</title>
+<title>Quint</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #0a0a0a; --surface: #141414; --border: #222; --text: #e0e0e0;
-  --muted: #888; --accent: #3b82f6; --green: #22c55e; --red: #ef4444;
-  --yellow: #eab308; --orange: #f97316;
+  --bg: #07080a; --surface: #0d0f12; --surface-2: #13161b; --border: #1c2028;
+  --text: #c8ccd4; --text-bright: #e8ecf4; --muted: #5c6370;
+  --green: #00d67e; --green-dim: rgba(0,214,126,0.12); --green-glow: rgba(0,214,126,0.06);
+  --red: #ff4757; --red-dim: rgba(255,71,87,0.12);
+  --amber: #ffb830; --amber-dim: rgba(255,184,48,0.12);
+  --blue: #4a9eff; --blue-dim: rgba(74,158,255,0.12);
+  --purple: #a78bfa; --purple-dim: rgba(167,139,250,0.12);
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+  --font-sans: 'Outfit', -apple-system, sans-serif;
 }
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
-a { color: var(--accent); text-decoration: none; }
+*{margin:0;padding:0;box-sizing:border-box}
+::selection{background:var(--green);color:var(--bg)}
+body{font-family:var(--font-mono);background:var(--bg);color:var(--text);font-size:13px;overflow:hidden;height:100vh}
+
+/* Scanline overlay */
+body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.03) 2px,rgba(0,0,0,0.03) 4px)}
 
 /* Layout */
-.shell { display: flex; height: 100vh; }
-nav { width: 200px; background: var(--surface); border-right: 1px solid var(--border); padding: 16px 0; flex-shrink: 0; display: flex; flex-direction: column; }
-nav .logo { padding: 0 16px 16px; font-size: 18px; font-weight: 700; letter-spacing: -0.5px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
-nav .logo span { color: var(--accent); }
-nav a { display: block; padding: 8px 16px; color: var(--muted); font-size: 13px; transition: all 0.15s; }
-nav a:hover, nav a.active { color: var(--text); background: rgba(255,255,255,0.04); }
-nav a.active { border-right: 2px solid var(--accent); }
-nav .spacer { flex: 1; }
-nav .version { padding: 8px 16px; color: var(--muted); font-size: 11px; }
-main { flex: 1; overflow-y: auto; padding: 24px 32px; }
-h1 { font-size: 20px; font-weight: 600; margin-bottom: 16px; }
+.shell{display:grid;grid-template-columns:56px 1fr;grid-template-rows:48px 1fr;height:100vh}
 
-/* Cards */
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
-.card .label { font-size: 11px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; letter-spacing: 0.5px; }
-.card .value { font-size: 24px; font-weight: 600; }
+/* Top bar */
+.topbar{grid-column:1/-1;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:16px;z-index:10}
+.topbar .logo{font-family:var(--font-sans);font-weight:700;font-size:16px;letter-spacing:-0.5px;color:var(--text-bright);display:flex;align-items:center;gap:8px}
+.topbar .logo .mark{width:24px;height:24px;border-radius:6px;background:linear-gradient(135deg,var(--green),#00b368);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--bg)}
+.topbar .sep{width:1px;height:20px;background:var(--border)}
+.topbar .status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.topbar .dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+.topbar .right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.topbar .counter{font-family:var(--font-mono);font-size:11px;color:var(--muted);padding:4px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:4px}
+
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+
+/* Sidebar */
+.sidebar{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:2px}
+.sidebar a{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:8px;color:var(--muted);transition:all 0.15s;cursor:pointer;text-decoration:none;position:relative}
+.sidebar a:hover{background:var(--surface-2);color:var(--text)}
+.sidebar a.active{color:var(--green);background:var(--green-glow)}
+.sidebar a.active::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:2px;height:16px;background:var(--green);border-radius:0 2px 2px 0}
+.sidebar a svg{width:18px;height:18px}
+.sidebar .spacer{flex:1}
+.sidebar .badge-count{position:absolute;top:4px;right:4px;min-width:14px;height:14px;border-radius:7px;background:var(--amber);color:var(--bg);font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 3px}
+
+/* Main content */
+main{overflow-y:auto;padding:24px 28px;background:var(--bg)}
+main::-webkit-scrollbar{width:6px}
+main::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+main::-webkit-scrollbar-track{background:transparent}
+
+/* Page header */
+.page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+.page-header h1{font-family:var(--font-sans);font-size:20px;font-weight:600;color:var(--text-bright);letter-spacing:-0.3px}
+.page-header .actions{display:flex;gap:8px}
+
+/* Stats grid */
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border);border-radius:10px;overflow:hidden;margin-bottom:24px}
+.stat{background:var(--surface);padding:16px 18px;position:relative;overflow:hidden}
+.stat::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--border)}
+.stat .label{font-size:10px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);margin-bottom:8px;font-family:var(--font-sans);font-weight:500}
+.stat .value{font-size:28px;font-weight:700;color:var(--text-bright);line-height:1;font-variant-numeric:tabular-nums}
+.stat .value.green{color:var(--green)}.stat .value.red{color:var(--red)}.stat .value.amber{color:var(--amber)}
+
+/* Activity feed */
+.feed{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.feed-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.feed-header h2{font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--text-bright)}
+.feed-header .live{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--green);text-transform:uppercase;letter-spacing:1px;font-weight:600}
+.feed-header .live .dot{width:5px;height:5px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
 
 /* Table */
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; padding: 8px 12px; color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
-tr:hover td { background: rgba(255,255,255,0.02); }
-.mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; }
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:10px 14px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:500;border-bottom:1px solid var(--border);font-family:var(--font-sans);position:sticky;top:0;background:var(--surface);z-index:1}
+td{padding:10px 14px;border-bottom:1px solid rgba(28,32,40,0.5);font-size:12px;vertical-align:middle}
+tr{transition:background 0.1s}
+tr:hover td{background:rgba(255,255,255,0.015)}
+.mono{font-family:var(--font-mono)}
 
-/* Badges */
-.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
-.badge-green { background: rgba(34,197,94,0.15); color: var(--green); }
-.badge-red { background: rgba(239,68,68,0.15); color: var(--red); }
-.badge-yellow { background: rgba(234,179,8,0.15); color: var(--yellow); }
-.badge-orange { background: rgba(249,115,22,0.15); color: var(--orange); }
-.badge-blue { background: rgba(59,130,246,0.15); color: var(--accent); }
-.badge-muted { background: rgba(136,136,136,0.15); color: var(--muted); }
+/* Tags */
+.tag{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:600;letter-spacing:0.3px;font-family:var(--font-sans);text-transform:uppercase}
+.tag-green{background:var(--green-dim);color:var(--green)}
+.tag-red{background:var(--red-dim);color:var(--red)}
+.tag-amber{background:var(--amber-dim);color:var(--amber)}
+.tag-blue{background:var(--blue-dim);color:var(--blue)}
+.tag-purple{background:var(--purple-dim);color:var(--purple)}
+.tag-muted{background:rgba(92,99,112,0.15);color:var(--muted)}
+.tag .indicator{width:5px;height:5px;border-radius:50%;background:currentColor}
 
 /* Buttons */
-.btn { display: inline-block; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer; transition: all 0.15s; }
-.btn:hover { border-color: var(--accent); }
-.btn-green { border-color: var(--green); color: var(--green); }
-.btn-green:hover { background: rgba(34,197,94,0.1); }
-.btn-red { border-color: var(--red); color: var(--red); }
-.btn-red:hover { background: rgba(239,68,68,0.1); }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn-primary:hover { opacity: 0.9; }
-
-/* Forms */
-.form-row { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
-.form-row label { font-size: 12px; color: var(--muted); min-width: 70px; }
-input, select { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; color: var(--text); font-size: 13px; }
-input:focus, select:focus { outline: none; border-color: var(--accent); }
-
-/* Pagination */
-.pagination { display: flex; gap: 8px; align-items: center; margin-top: 12px; justify-content: space-between; }
-.pagination .info { font-size: 12px; color: var(--muted); }
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:6px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:12px;font-family:var(--font-mono);cursor:pointer;transition:all 0.15s}
+.btn:hover{border-color:var(--green);color:var(--text-bright)}
+.btn-primary{background:var(--green);border-color:var(--green);color:var(--bg);font-weight:600}
+.btn-primary:hover{opacity:0.9;transform:translateY(-1px)}
+.btn-danger{border-color:var(--red);color:var(--red)}
+.btn-danger:hover{background:var(--red-dim)}
+.btn-sm{padding:4px 10px;font-size:11px}
 
 /* Filters */
-.filters { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
-.filters input, .filters select { min-width: 120px; }
+.filters{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
+input,select{background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:7px 12px;color:var(--text);font-size:12px;font-family:var(--font-mono);outline:none;transition:border-color 0.15s}
+input:focus,select:focus{border-color:var(--green)}
+input::placeholder{color:var(--muted)}
+
+/* Pagination */
+.pagination{display:flex;justify-content:space-between;align-items:center;padding:12px 0}
+.pagination .info{font-size:11px;color:var(--muted)}
 
 /* Section */
-.section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
-.section h2 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+.section{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px}
+.section-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.section-header h2{font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--text-bright)}
+.section-body{padding:16px 18px}
 
-/* Create form */
-.create-form { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; display: none; }
-.create-form.show { display: block; }
-.key-display { background: var(--bg); border: 1px solid var(--green); border-radius: 6px; padding: 12px; margin-top: 12px; font-family: monospace; font-size: 12px; word-break: break-all; color: var(--green); }
+/* Create agent form */
+.create-form{background:var(--surface);border:1px solid var(--green);border-radius:10px;padding:20px;margin-bottom:16px;display:none}
+.create-form.show{display:block;animation:slideDown 0.2s ease}
+@keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+.form-row{display:flex;gap:10px;margin-bottom:10px;align-items:center}
+.form-row label{font-size:11px;color:var(--muted);min-width:60px;text-transform:uppercase;letter-spacing:0.5px;font-family:var(--font-sans);font-weight:500}
+.form-row input,.form-row select{flex:1}
+.key-display{background:var(--bg);border:1px solid var(--green);border-radius:8px;padding:14px;margin-top:14px;font-size:11px;word-break:break-all;color:var(--green);line-height:1.6}
+
+/* Approval card */
+.approval-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:flex-start;transition:border-color 0.15s}
+.approval-card:hover{border-color:var(--amber)}
+.approval-card .meta{display:flex;flex-direction:column;gap:6px}
+.approval-card .meta .tool{font-family:var(--font-mono);font-size:14px;font-weight:600;color:var(--text-bright)}
+.approval-card .meta .details{font-size:11px;color:var(--muted);display:flex;gap:12px}
+.approval-card .meta .id{font-size:10px;color:var(--muted);font-family:var(--font-mono)}
+.approval-card .actions{display:flex;gap:8px;flex-shrink:0}
+
+/* Policy viewer */
+.policy-viewer{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.policy-viewer pre{padding:20px;font-size:12px;line-height:1.7;color:var(--text);white-space:pre-wrap;max-height:calc(100vh - 200px);overflow:auto}
+.policy-viewer pre::-webkit-scrollbar{width:6px}
+.policy-viewer pre::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 
 /* Empty state */
-.empty { text-align: center; padding: 32px; color: var(--muted); }
+.empty{text-align:center;padding:48px 24px;color:var(--muted);font-size:12px}
+.empty .icon{font-size:32px;margin-bottom:12px;opacity:0.3}
+
+/* Page transitions */
+.tab{display:none;animation:fadeIn 0.15s ease}
+.tab.active{display:block}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+
+/* Connected services */
+.service-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+.service-row:last-child{border-bottom:none}
+.service-icon{width:32px;height:32px;border-radius:8px;background:var(--surface-2);display:flex;align-items:center;justify-content:center;font-size:14px}
+.service-info{flex:1}
+.service-info .name{font-weight:600;color:var(--text-bright);font-size:13px}
+.service-info .scopes{font-size:11px;color:var(--muted);margin-top:2px}
 </style>
 </head>
 <body>
+
+<!-- Top Bar -->
 <div class="shell">
-  <nav>
-    <div class="logo"><span>Q</span>uint</div>
-    <a href="#overview" class="active" data-tab="overview">Overview</a>
-    <a href="#audit" data-tab="audit">Audit Log</a>
-    <a href="#agents" data-tab="agents">Agents</a>
-    <a href="#approvals" data-tab="approvals">Approvals</a>
-    <a href="#policy" data-tab="policy">Policy</a>
-    <div class="spacer"></div>
-    <div class="version">quint-proxy dev</div>
-  </nav>
-  <main>
-    <!-- Overview -->
-    <div id="tab-overview">
-      <h1>Overview</h1>
-      <div class="cards" id="status-cards"></div>
-      <div class="section">
+<div class="topbar">
+  <div class="logo"><div class="mark">Q</div>Quint</div>
+  <div class="sep"></div>
+  <div class="status"><span class="dot"></span>Gateway active</div>
+  <div class="right">
+    <div class="counter" id="entry-counter">-- entries</div>
+  </div>
+</div>
+
+<!-- Sidebar -->
+<div class="sidebar">
+  <a href="#" class="active" data-tab="overview" title="Overview">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+  </a>
+  <a href="#" data-tab="audit" title="Audit Log">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+  </a>
+  <a href="#" data-tab="agents" title="Agents">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+  </a>
+  <a href="#" data-tab="approvals" title="Approvals" id="nav-approvals">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+  </a>
+  <a href="#" data-tab="services" title="Connected Services">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+  </a>
+  <div class="spacer"></div>
+  <a href="#" data-tab="policy" title="Policy">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+  </a>
+</div>
+
+<!-- Main Content -->
+<main>
+  <!-- Overview -->
+  <div id="tab-overview" class="tab active">
+    <div class="page-header"><h1>Overview</h1></div>
+    <div class="stats" id="status-cards"></div>
+    <div class="feed">
+      <div class="feed-header">
         <h2>Recent Activity</h2>
-        <table><thead><tr><th>Time</th><th>Tool</th><th>Verdict</th><th>Agent</th><th>Risk</th></tr></thead><tbody id="recent-activity"></tbody></table>
+        <div class="live"><span class="dot"></span>Live</div>
       </div>
+      <table><thead><tr><th>Time</th><th>Server</th><th>Tool</th><th>Verdict</th><th>Agent</th><th>Risk</th></tr></thead><tbody id="recent-activity"></tbody></table>
     </div>
+  </div>
 
-    <!-- Audit -->
-    <div id="tab-audit" style="display:none">
-      <h1>Audit Log</h1>
-      <div class="filters">
-        <select id="f-verdict"><option value="">All verdicts</option><option value="allow">allow</option><option value="deny">deny</option><option value="passthrough">passthrough</option><option value="scope_denied">scope_denied</option><option value="approval_pending">approval_pending</option><option value="rate_limited">rate_limited</option></select>
-        <input id="f-tool" placeholder="Tool name...">
-        <input id="f-agent" placeholder="Agent name...">
-        <button class="btn" onclick="loadAudit()">Filter</button>
-      </div>
-      <table><thead><tr><th>ID</th><th>Time</th><th>Dir</th><th>Method</th><th>Tool</th><th>Verdict</th><th>Risk</th><th>Agent</th></tr></thead><tbody id="audit-rows"></tbody></table>
-      <div class="pagination"><span class="info" id="audit-info"></span><div><button class="btn" id="audit-prev" onclick="auditPage(-1)">Prev</button> <button class="btn" id="audit-next" onclick="auditPage(1)">Next</button></div></div>
+  <!-- Audit -->
+  <div id="tab-audit" class="tab">
+    <div class="page-header"><h1>Audit Log</h1></div>
+    <div class="filters">
+      <select id="f-verdict"><option value="">All verdicts</option><option value="allow">allow</option><option value="deny">deny</option><option value="passthrough">passthrough</option><option value="scope_denied">scope_denied</option><option value="approval_pending">approval_pending</option><option value="rate_limited">rate_limited</option></select>
+      <input id="f-tool" placeholder="Filter by tool...">
+      <input id="f-agent" placeholder="Filter by agent...">
+      <button class="btn" onclick="loadAudit()">Apply</button>
     </div>
+    <div class="feed">
+      <table><thead><tr><th>#</th><th>Time</th><th>Dir</th><th>Method</th><th>Tool</th><th>Verdict</th><th>Risk</th><th>Agent</th></tr></thead><tbody id="audit-rows"></tbody></table>
+    </div>
+    <div class="pagination"><span class="info" id="audit-info"></span><div><button class="btn btn-sm" id="audit-prev" onclick="auditPage(-1)">&larr; Prev</button> <button class="btn btn-sm" id="audit-next" onclick="auditPage(1)">Next &rarr;</button></div></div>
+  </div>
 
-    <!-- Agents -->
-    <div id="tab-agents" style="display:none">
-      <h1>Agents <button class="btn btn-primary" onclick="toggleCreate()" style="margin-left:12px;font-size:12px">+ Create</button></h1>
-      <div class="create-form" id="create-form">
-        <div class="form-row"><label>Name</label><input id="a-name" placeholder="research-bot"></div>
-        <div class="form-row"><label>Type</label><input id="a-type" placeholder="generic" value="generic"></div>
-        <div class="form-row"><label>Scopes</label><select id="a-scopes"><option value="tools:read">tools:read</option><option value="tools:write">tools:write</option><option value="tools:execute">tools:execute</option><option value="tools:admin">tools:admin</option><option value="tools:read,tools:write">tools:read,tools:write</option><option value="tools:admin,tools:execute">tools:admin,tools:execute</option></select></div>
-        <div class="form-row"><label>Desc</label><input id="a-desc" placeholder="Optional description"></div>
-        <button class="btn btn-primary" onclick="createAgent()">Create Agent</button>
-        <div id="new-key"></div>
-      </div>
-      <table><thead><tr><th>Name</th><th>Type</th><th>Scopes</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody id="agent-rows"></tbody></table>
+  <!-- Agents -->
+  <div id="tab-agents" class="tab">
+    <div class="page-header"><h1>Agents</h1><div class="actions"><button class="btn btn-primary" onclick="toggleCreate()">+ New Agent</button></div></div>
+    <div class="create-form" id="create-form">
+      <div class="form-row"><label>Name</label><input id="a-name" placeholder="research-bot"></div>
+      <div class="form-row"><label>Type</label><input id="a-type" value="generic" placeholder="generic"></div>
+      <div class="form-row"><label>Scopes</label><select id="a-scopes"><option value="tools:read">tools:read</option><option value="tools:write">tools:write</option><option value="tools:execute">tools:execute</option><option value="tools:admin">tools:admin</option><option value="tools:read,tools:write">tools:read + tools:write</option><option value="tools:admin,tools:execute">tools:admin + tools:execute</option></select></div>
+      <div class="form-row"><label>Desc</label><input id="a-desc" placeholder="What does this agent do?"></div>
+      <div style="display:flex;gap:8px;margin-top:4px"><button class="btn btn-primary" onclick="createAgent()">Create Agent</button><button class="btn" onclick="toggleCreate()">Cancel</button></div>
+      <div id="new-key"></div>
     </div>
+    <div class="feed">
+      <table><thead><tr><th>Name</th><th>Type</th><th>Scopes</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody id="agent-rows"></tbody></table>
+    </div>
+  </div>
 
-    <!-- Approvals -->
-    <div id="tab-approvals" style="display:none">
-      <h1>Pending Approvals</h1>
-      <div id="approval-list"></div>
-    </div>
+  <!-- Approvals -->
+  <div id="tab-approvals" class="tab">
+    <div class="page-header"><h1>Pending Approvals</h1></div>
+    <div id="approval-list"></div>
+  </div>
 
-    <!-- Policy -->
-    <div id="tab-policy" style="display:none">
-      <h1>Policy</h1>
-      <pre id="policy-json" class="section mono" style="white-space:pre-wrap;font-size:12px;max-height:80vh;overflow:auto"></pre>
+  <!-- Connected Services -->
+  <div id="tab-services" class="tab">
+    <div class="page-header"><h1>Connected Services</h1></div>
+    <div class="section" id="services-list">
+      <div class="section-body" id="services-body"></div>
     </div>
-  </main>
+  </div>
+
+  <!-- Policy -->
+  <div id="tab-policy" class="tab">
+    <div class="page-header"><h1>Policy Configuration</h1></div>
+    <div class="policy-viewer"><pre id="policy-json"></pre></div>
+  </div>
+</main>
 </div>
 
 <script>
@@ -156,196 +272,170 @@ let auditOffset = 0;
 const LIMIT = 50;
 
 // Navigation
-document.querySelectorAll('nav a[data-tab]').forEach(a => {
+document.querySelectorAll('.sidebar a[data-tab]').forEach(a => {
   a.addEventListener('click', e => {
     e.preventDefault();
-    document.querySelectorAll('nav a').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.sidebar a').forEach(x => x.classList.remove('active'));
     a.classList.add('active');
-    document.querySelectorAll('main > div').forEach(d => d.style.display = 'none');
-    document.getElementById('tab-' + a.dataset.tab).style.display = '';
-    if (a.dataset.tab === 'audit') loadAudit();
-    if (a.dataset.tab === 'agents') loadAgents();
-    if (a.dataset.tab === 'approvals') loadApprovals();
-    if (a.dataset.tab === 'policy') loadPolicy();
-    if (a.dataset.tab === 'overview') loadOverview();
+    document.querySelectorAll('.tab').forEach(d => d.classList.remove('active'));
+    document.getElementById('tab-' + a.dataset.tab).classList.add('active');
+    const t = a.dataset.tab;
+    if(t==='audit')loadAudit();if(t==='agents')loadAgents();if(t==='approvals')loadApprovals();
+    if(t==='policy')loadPolicy();if(t==='overview')loadOverview();if(t==='services')loadServices();
   });
 });
 
 // Helpers
-function badge(text, cls) { return `<span class="badge badge-${cls}">${esc(text)}</span>`; }
-function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-function verdictBadge(v) {
-  const m = {allow:'green',passthrough:'blue',deny:'red',scope_denied:'red',flag_denied:'orange',rate_limited:'yellow',approval_pending:'yellow',approved:'green'};
-  return badge(v, m[v] || 'muted');
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function tag(text,cls){return`<span class="tag tag-${cls}"><span class="indicator"></span>${esc(text)}</span>`}
+function verdictTag(v){
+  const m={allow:'green',passthrough:'blue',deny:'red',scope_denied:'red',flag_denied:'amber',rate_limited:'amber',approval_pending:'amber',approved:'green'};
+  return tag(v,m[v]||'muted');
 }
-function riskBadge(score, level) {
-  if (score == null) return '<span class="badge badge-muted">-</span>';
-  const m = {low:'green',medium:'yellow',high:'orange',critical:'red'};
-  return badge(score + ' ' + (level||''), m[level] || 'muted');
+function riskTag(s,l){
+  if(s==null)return'<span class="tag tag-muted">--</span>';
+  const m={low:'green',medium:'amber',high:'red',critical:'red'};
+  return tag(s+' '+(l||''),m[l]||'muted');
 }
-function statusBadge(s) {
-  const m = {active:'green',suspended:'yellow',revoked:'red'};
-  return badge(s, m[s] || 'muted');
+function statusTag(s){return tag(s,{active:'green',suspended:'amber',revoked:'red'}[s]||'muted')}
+function timeStr(ts){
+  if(!ts)return'--';const d=new Date(ts);
+  return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
 }
-function timeAgo(ts) {
-  if (!ts) return '-';
-  const d = new Date(ts);
-  return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) + ' ' + d.toLocaleDateString([], {month:'short',day:'numeric'});
+function dateStr(ts){
+  if(!ts)return'--';const d=new Date(ts);
+  return d.toLocaleDateString([],{month:'short',day:'numeric',year:'numeric'});
 }
-
-async function api(path, opts) {
-  const r = await fetch(API + path, opts);
-  return r.json();
-}
+async function api(p,o){const r=await fetch(API+p,o);return r.json()}
 
 // Overview
-async function loadOverview() {
-  const data = await api('/api/status');
-  const a = data.audit || {};
-  document.getElementById('status-cards').innerHTML = `
-    <div class="card"><div class="label">Audit Entries</div><div class="value">${a.total_entries || 0}</div></div>
-    <div class="card"><div class="label">Denied</div><div class="value" style="color:var(--red)">${a.denied || 0}</div></div>
-    <div class="card"><div class="label">High Risk</div><div class="value" style="color:var(--orange)">${a.high_risk || 0}</div></div>
-    <div class="card"><div class="label">Active Agents</div><div class="value" style="color:var(--green)">${data.agents_active || 0}</div></div>
-    <div class="card"><div class="label">Pending Approvals</div><div class="value" style="color:var(--yellow)">${data.approvals_pending || 0}</div></div>
-  `;
-  const audit = await api('/api/audit?limit=10');
-  const rows = (audit.entries || []).filter(e => e.Direction === 'request');
-  document.getElementById('recent-activity').innerHTML = rows.length === 0
-    ? '<tr><td colspan="5" class="empty">No activity yet</td></tr>'
-    : rows.map(e => `<tr>
-        <td>${timeAgo(e.Timestamp)}</td>
-        <td class="mono">${esc(e.ToolName || e.Method)}</td>
-        <td>${verdictBadge(e.Verdict)}</td>
-        <td>${esc(e.AgentName || '-')}</td>
-        <td>${riskBadge(e.RiskScore, e.RiskLevel)}</td>
-      </tr>`).join('');
+async function loadOverview(){
+  const d=await api('/api/status');const a=d.audit||{};
+  document.getElementById('entry-counter').textContent=(a.total_entries||0).toLocaleString()+' entries';
+  document.getElementById('status-cards').innerHTML=`
+    <div class="stat"><div class="label">Total Events</div><div class="value">${(a.total_entries||0).toLocaleString()}</div></div>
+    <div class="stat"><div class="label">Denied</div><div class="value red">${a.denied||0}</div></div>
+    <div class="stat"><div class="label">High Risk</div><div class="value amber">${a.high_risk||0}</div></div>
+    <div class="stat"><div class="label">Active Agents</div><div class="value green">${d.agents_active||0}</div></div>
+    <div class="stat"><div class="label">Pending</div><div class="value ${(d.approvals_pending||0)>0?'amber':''}">${d.approvals_pending||0}</div></div>`;
+  if((d.approvals_pending||0)>0){
+    document.getElementById('nav-approvals').innerHTML+=`<span class="badge-count">${d.approvals_pending}</span>`;
+  }
+  const audit=await api('/api/audit?limit=12');
+  const rows=(audit.entries||[]).filter(e=>e.Direction==='request');
+  document.getElementById('recent-activity').innerHTML=rows.length===0
+    ?'<tr><td colspan="6" class="empty"><div class="icon">~</div>No activity yet. Tool calls will appear here in real time.</td></tr>'
+    :rows.map(e=>`<tr>
+      <td style="color:var(--muted)">${timeStr(e.Timestamp)}</td>
+      <td style="color:var(--muted);font-size:11px">${esc(e.ServerName||'--')}</td>
+      <td style="color:var(--text-bright)">${esc(e.ToolName||e.Method)}</td>
+      <td>${verdictTag(e.Verdict)}</td>
+      <td style="color:var(--muted)">${esc(e.AgentName||'--')}</td>
+      <td>${riskTag(e.RiskScore,e.RiskLevel)}</td>
+    </tr>`).join('');
 }
 
 // Audit
-async function loadAudit() {
-  const v = document.getElementById('f-verdict').value;
-  const t = document.getElementById('f-tool').value;
-  const a = document.getElementById('f-agent').value;
-  let q = `/api/audit?limit=${LIMIT}&offset=${auditOffset}`;
-  if (v) q += `&verdict=${v}`;
-  if (t) q += `&tool=${encodeURIComponent(t)}`;
-  if (a) q += `&agent=${encodeURIComponent(a)}`;
-  const data = await api(q);
-  const rows = data.entries || [];
-  document.getElementById('audit-rows').innerHTML = rows.length === 0
-    ? '<tr><td colspan="8" class="empty">No entries</td></tr>'
-    : rows.map(e => `<tr>
-        <td class="mono">${e.ID}</td>
-        <td>${timeAgo(e.Timestamp)}</td>
-        <td>${esc(e.Direction)}</td>
-        <td class="mono">${esc(e.Method)}</td>
-        <td class="mono">${esc(e.ToolName || '-')}</td>
-        <td>${verdictBadge(e.Verdict)}</td>
-        <td>${riskBadge(e.RiskScore, e.RiskLevel)}</td>
-        <td>${esc(e.AgentName || '-')}</td>
-      </tr>`).join('');
-  document.getElementById('audit-info').textContent = `Showing ${auditOffset+1}–${auditOffset+rows.length} of ${data.total}`;
-  document.getElementById('audit-prev').disabled = auditOffset === 0;
-  document.getElementById('audit-next').disabled = auditOffset + LIMIT >= data.total;
+async function loadAudit(){
+  const v=document.getElementById('f-verdict').value;
+  const t=document.getElementById('f-tool').value;
+  const a=document.getElementById('f-agent').value;
+  let q=`/api/audit?limit=${LIMIT}&offset=${auditOffset}`;
+  if(v)q+=`&verdict=${v}`;if(t)q+=`&tool=${encodeURIComponent(t)}`;if(a)q+=`&agent=${encodeURIComponent(a)}`;
+  const d=await api(q);const rows=d.entries||[];
+  document.getElementById('audit-rows').innerHTML=rows.length===0
+    ?'<tr><td colspan="8" class="empty">No entries match filters</td></tr>'
+    :rows.map(e=>`<tr>
+      <td style="color:var(--muted);font-size:11px">${e.ID}</td>
+      <td style="color:var(--muted)">${timeStr(e.Timestamp)}</td>
+      <td><span class="tag tag-${e.Direction==='request'?'blue':'purple'}">${e.Direction}</span></td>
+      <td style="font-size:11px">${esc(e.Method)}</td>
+      <td style="color:var(--text-bright)">${esc(e.ToolName||'--')}</td>
+      <td>${verdictTag(e.Verdict)}</td>
+      <td>${riskTag(e.RiskScore,e.RiskLevel)}</td>
+      <td style="color:var(--muted)">${esc(e.AgentName||'--')}</td>
+    </tr>`).join('');
+  document.getElementById('audit-info').textContent=`${auditOffset+1}–${auditOffset+rows.length} of ${d.total}`;
+  document.getElementById('audit-prev').disabled=auditOffset===0;
+  document.getElementById('audit-next').disabled=auditOffset+LIMIT>=d.total;
 }
-function auditPage(dir) { auditOffset = Math.max(0, auditOffset + dir * LIMIT); loadAudit(); }
+function auditPage(dir){auditOffset=Math.max(0,auditOffset+dir*LIMIT);loadAudit()}
 
 // Agents
-async function loadAgents() {
-  const data = await api('/api/agents');
-  const agents = data.agents || [];
-  document.getElementById('agent-rows').innerHTML = agents.length === 0
-    ? '<tr><td colspan="6" class="empty">No agents. Create one to get started.</td></tr>'
-    : agents.map(a => `<tr>
-        <td><strong>${esc(a.Name)}</strong></td>
-        <td>${esc(a.Type)}</td>
-        <td class="mono">${esc(a.Scopes)}</td>
-        <td>${statusBadge(a.Status)}</td>
-        <td>${timeAgo(a.CreatedAt)}</td>
-        <td>${a.Status==='active' ? `<button class="btn btn-red" onclick="agentAction('${esc(a.Name)}','suspend')">Suspend</button> <button class="btn btn-red" onclick="agentAction('${esc(a.Name)}','revoke')">Revoke</button>` : a.Status==='suspended' ? `<button class="btn btn-green" onclick="agentAction('${esc(a.Name)}','activate')">Activate</button> <button class="btn btn-red" onclick="agentAction('${esc(a.Name)}','revoke')">Revoke</button>` : '<span class="badge badge-muted">revoked</span>'}</td>
-      </tr>`).join('');
+async function loadAgents(){
+  const d=await api('/api/agents');const agents=d.agents||[];
+  document.getElementById('agent-rows').innerHTML=agents.length===0
+    ?'<tr><td colspan="6" class="empty"><div class="icon">~</div>No agents. Create one to assign scoped API keys.</td></tr>'
+    :agents.map(a=>`<tr>
+      <td style="color:var(--text-bright);font-weight:600">${esc(a.Name)}</td>
+      <td style="color:var(--muted)">${esc(a.Type)}</td>
+      <td><span class="tag tag-blue">${esc(a.Scopes)}</span></td>
+      <td>${statusTag(a.Status)}</td>
+      <td style="color:var(--muted);font-size:11px">${dateStr(a.CreatedAt)}</td>
+      <td>${a.Status==='active'?`<button class="btn btn-sm" onclick="agentAction('${esc(a.Name)}','suspend')">Suspend</button> <button class="btn btn-sm btn-danger" onclick="agentAction('${esc(a.Name)}','revoke')">Revoke</button>`:a.Status==='suspended'?`<button class="btn btn-sm" onclick="agentAction('${esc(a.Name)}','activate')">Activate</button> <button class="btn btn-sm btn-danger" onclick="agentAction('${esc(a.Name)}','revoke')">Revoke</button>`:'<span class="tag tag-muted">revoked</span>'}</td>
+    </tr>`).join('');
 }
-async function agentAction(name, action) {
-  await api(`/api/agents/${name}/${action}`, {method:'POST'});
-  loadAgents();
-}
-function toggleCreate() { document.getElementById('create-form').classList.toggle('show'); document.getElementById('new-key').innerHTML = ''; }
-async function createAgent() {
-  const name = document.getElementById('a-name').value.trim();
-  if (!name) return;
-  const data = await api('/api/agents', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({
-      name,
-      type: document.getElementById('a-type').value || 'generic',
-      scopes: document.getElementById('a-scopes').value,
-      description: document.getElementById('a-desc').value,
-    })
-  });
-  if (data.error) { alert(data.error); return; }
-  document.getElementById('new-key').innerHTML = `<div class="key-display">API Key (save this — shown once):<br><br>${esc(data.api_key)}</div>`;
-  document.getElementById('a-name').value = '';
-  loadAgents();
+async function agentAction(n,a){await api(`/api/agents/${n}/${a}`,{method:'POST'});loadAgents()}
+function toggleCreate(){document.getElementById('create-form').classList.toggle('show');document.getElementById('new-key').innerHTML=''}
+async function createAgent(){
+  const n=document.getElementById('a-name').value.trim();if(!n)return;
+  const d=await api('/api/agents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,type:document.getElementById('a-type').value||'generic',scopes:document.getElementById('a-scopes').value,description:document.getElementById('a-desc').value})});
+  if(d.error){alert(d.error);return}
+  document.getElementById('new-key').innerHTML=`<div class="key-display">API Key — save this, it won't be shown again:<br><br><strong>${esc(d.api_key)}</strong></div>`;
+  document.getElementById('a-name').value='';loadAgents();
 }
 
 // Approvals
-async function loadApprovals() {
-  const data = await api('/api/approvals');
-  const pending = data.pending || [];
-  document.getElementById('approval-list').innerHTML = pending.length === 0
-    ? '<div class="empty">No pending approvals</div>'
-    : pending.map(r => `<div class="section">
-        <div style="display:flex;justify-content:space-between;align-items:start">
-          <div>
-            <strong class="mono">${esc(r.ToolName)}</strong> ${riskBadge(r.RiskScore, r.RiskLevel)}<br>
-            <span style="color:var(--muted);font-size:12px">Agent: ${esc(r.AgentName)} · Server: ${esc(r.ServerName)} · ${timeAgo(r.CreatedAt)}</span><br>
-            <span class="mono" style="font-size:11px;color:var(--muted)">ID: ${esc(r.ID)}</span>
-          </div>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-green" onclick="approvalDecide('${esc(r.ID)}','approve')">Approve</button>
-            <button class="btn btn-red" onclick="approvalDecide('${esc(r.ID)}','deny')">Deny</button>
-          </div>
-        </div>
-      </div>`).join('');
+async function loadApprovals(){
+  const d=await api('/api/approvals');const p=d.pending||[];
+  document.getElementById('approval-list').innerHTML=p.length===0
+    ?'<div class="empty"><div class="icon">~</div>No pending approvals. High-risk tool calls will appear here for review.</div>'
+    :p.map(r=>`<div class="approval-card">
+      <div class="meta">
+        <div class="tool">${esc(r.ToolName)} ${riskTag(r.RiskScore,r.RiskLevel)}</div>
+        <div class="details"><span>Agent: ${esc(r.AgentName)}</span><span>Server: ${esc(r.ServerName)}</span><span>${timeStr(r.CreatedAt)}</span></div>
+        <div class="id">${esc(r.ID)}</div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary btn-sm" onclick="approvalDecide('${esc(r.ID)}','approve')">Approve</button>
+        <button class="btn btn-danger btn-sm" onclick="approvalDecide('${esc(r.ID)}','deny')">Deny</button>
+      </div>
+    </div>`).join('');
 }
-async function approvalDecide(id, action) {
-  await api(`/api/approvals/${id}/${action}`, {method:'POST'});
-  loadApprovals();
-  loadOverview();
+async function approvalDecide(id,a){await api(`/api/approvals/${id}/${a}`,{method:'POST'});loadApprovals();loadOverview()}
+
+// Connected Services
+async function loadServices(){
+  // Simple display of known connections
+  const creds = await api('/api/status');
+  document.getElementById('services-body').innerHTML=`
+    <div class="service-row"><div class="service-icon">fs</div><div class="service-info"><div class="name">Filesystem</div><div class="scopes">stdio · read, write, edit, search</div></div>${tag('connected','green')}</div>
+    <div class="service-row"><div class="service-icon">mem</div><div class="service-info"><div class="name">Memory</div><div class="scopes">stdio · knowledge graph</div></div>${tag('connected','green')}</div>
+    <div class="service-row"><div class="service-icon">gh</div><div class="service-info"><div class="name">GitHub</div><div class="scopes">OAuth · repo, read:org</div></div>${tag('connected','green')}</div>
+  `;
 }
 
 // Policy
-async function loadPolicy() {
-  const data = await api('/api/policy');
-  document.getElementById('policy-json').textContent = JSON.stringify(data, null, 2);
+async function loadPolicy(){
+  const d=await api('/api/policy');
+  document.getElementById('policy-json').textContent=JSON.stringify(d,null,2);
 }
 
 // SSE Live Updates
 let evtSource;
-function connectSSE() {
-  evtSource = new EventSource(API + '/api/events');
-  evtSource.onmessage = (e) => {
-    const data = JSON.parse(e.data);
-    if (data.type === 'new_entries') {
-      // Refresh the active tab
-      const activeTab = document.querySelector('nav a.active');
-      if (activeTab) {
-        const tab = activeTab.dataset.tab;
-        if (tab === 'overview') loadOverview();
-        if (tab === 'audit') loadAudit();
-        if (tab === 'approvals') loadApprovals();
-      }
+function connectSSE(){
+  evtSource=new EventSource(API+'/api/events');
+  evtSource.onmessage=(e)=>{
+    const data=JSON.parse(e.data);
+    if(data.type==='new_entries'){
+      const active=document.querySelector('.sidebar a.active');
+      if(active){const t=active.dataset.tab;if(t==='overview')loadOverview();if(t==='audit')loadAudit();if(t==='approvals')loadApprovals()}
+      if(data.total)document.getElementById('entry-counter').textContent=data.total.toLocaleString()+' entries';
     }
   };
-  evtSource.onerror = () => {
-    evtSource.close();
-    setTimeout(connectSSE, 5000); // reconnect after 5s
-  };
+  evtSource.onerror=()=>{evtSource.close();setTimeout(connectSSE,5000)};
 }
 
-// Init
 loadOverview();
 connectSSE();
 </script>
