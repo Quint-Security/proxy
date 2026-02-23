@@ -1,0 +1,68 @@
+{
+  "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA07SKAKCKKVQrm0dim6Dl1TSE1d/X/i0vUoOs94j2pYA=\n-----END PUBLIC KEY-----\n",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIJPW+TSDk0KkA40umrilCEwWPV8nDobqq3HjRpU/MS+e\n-----END PRIVATE KEY-----\n",
+  "test_cases": [
+    {
+      "name": "entry_without_risk_fields",
+      "entry": {
+        "timestamp": "2025-01-15T10:30:00.000Z",
+        "server_name": "builder-mcp",
+        "direction": "request",
+        "method": "tools/call",
+        "message_id": "msg-123",
+        "tool_name": "ReadFile",
+        "arguments_json": "{\"path\":\"/tmp/test.txt\"}",
+        "response_json": null,
+        "verdict": "allow",
+        "policy_hash": "abc123def456",
+        "prev_hash": "",
+        "nonce": "550e8400-e29b-41d4-a716-446655440000",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA07SKAKCKKVQrm0dim6Dl1TSE1d/X/i0vUoOs94j2pYA=\n-----END PUBLIC KEY-----\n"
+      },
+      "canonical": "{\"arguments_json\":\"{\\\"path\\\":\\\"/tmp/test.txt\\\"}\",\"direction\":\"request\",\"message_id\":\"msg-123\",\"method\":\"tools/call\",\"nonce\":\"550e8400-e29b-41d4-a716-446655440000\",\"policy_hash\":\"abc123def456\",\"prev_hash\":\"\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEA07SKAKCKKVQrm0dim6Dl1TSE1d/X/i0vUoOs94j2pYA=\\n-----END PUBLIC KEY-----\\n\",\"response_json\":null,\"server_name\":\"builder-mcp\",\"timestamp\":\"2025-01-15T10:30:00.000Z\",\"tool_name\":\"ReadFile\",\"verdict\":\"allow\"}",
+      "signature": "22e227eaab79d3abad70bf3d60c3a5679395c042e7e2c3a4af22632d8cfcac634e916b925a3d9c213fe24b6da13c92d5729c5917ad468def3c61841216c32c0b"
+    },
+    {
+      "name": "entry_with_risk_fields",
+      "entry": {
+        "timestamp": "2025-01-15T10:31:00.000Z",
+        "server_name": "builder-mcp",
+        "direction": "response",
+        "method": "tools/call",
+        "message_id": "msg-456",
+        "tool_name": "WriteFile",
+        "arguments_json": "{\"path\":\"/etc/passwd\",\"content\":\"hacked\"}",
+        "response_json": "{\"result\":\"blocked\"}",
+        "verdict": "deny",
+        "policy_hash": "abc123def456",
+        "prev_hash": "",
+        "nonce": "660e8400-e29b-41d4-a716-446655440001",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA07SKAKCKKVQrm0dim6Dl1TSE1d/X/i0vUoOs94j2pYA=\n-----END PUBLIC KEY-----\n",
+        "risk_score": 85,
+        "risk_level": "critical"
+      },
+      "canonical": "{\"arguments_json\":\"{\\\"path\\\":\\\"/etc/passwd\\\",\\\"content\\\":\\\"hacked\\\"}\",\"direction\":\"response\",\"message_id\":\"msg-456\",\"method\":\"tools/call\",\"nonce\":\"660e8400-e29b-41d4-a716-446655440001\",\"policy_hash\":\"abc123def456\",\"prev_hash\":\"\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEA07SKAKCKKVQrm0dim6Dl1TSE1d/X/i0vUoOs94j2pYA=\\n-----END PUBLIC KEY-----\\n\",\"response_json\":\"{\\\"result\\\":\\\"blocked\\\"}\",\"risk_level\":\"critical\",\"risk_score\":85,\"server_name\":\"builder-mcp\",\"timestamp\":\"2025-01-15T10:31:00.000Z\",\"tool_name\":\"WriteFile\",\"verdict\":\"deny\"}",
+      "signature": "df71e331cf6857256e6ecf7554dd5f013e20a87ae2846bfdf802e3a4534c7f4b831a84b84cc642972686f8a4f8a71efb0d222c67295e1a81d22fd71e71a3580e"
+    },
+    {
+      "name": "entry_with_null_fields",
+      "entry": {
+        "timestamp": "2025-01-15T10:32:00.000Z",
+        "server_name": "test-server",
+        "direction": "request",
+        "method": "notifications/initialized",
+        "message_id": null,
+        "tool_name": null,
+        "arguments_json": null,
+        "response_json": null,
+        "verdict": "passthrough",
+        "policy_hash": "",
+        "prev_hash": "",
+        "nonce": "770e8400-e29b-41d4-a716-446655440002",
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA07SKAKCKKVQrm0dim6Dl1TSE1d/X/i0vUoOs94j2pYA=\n-----END PUBLIC KEY-----\n"
+      },
+      "canonical": "{\"arguments_json\":null,\"direction\":\"request\",\"message_id\":null,\"method\":\"notifications/initialized\",\"nonce\":\"770e8400-e29b-41d4-a716-446655440002\",\"policy_hash\":\"\",\"prev_hash\":\"\",\"public_key\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEA07SKAKCKKVQrm0dim6Dl1TSE1d/X/i0vUoOs94j2pYA=\\n-----END PUBLIC KEY-----\\n\",\"response_json\":null,\"server_name\":\"test-server\",\"timestamp\":\"2025-01-15T10:32:00.000Z\",\"tool_name\":null,\"verdict\":\"passthrough\"}",
+      "signature": "9bd4430329c8d41152085ccbcb5b2ea334caff5cd372757e80e2bf50779a380b214ecc387fdd3f9bfc19e717c1a5f4970abd4e648f4d57e97aa1fd497945fc09"
+    }
+  ]
+}

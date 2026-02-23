@@ -22,13 +22,9 @@ type testCase struct {
 
 func loadFixture(t *testing.T) testFixture {
 	t.Helper()
-	data, err := os.ReadFile("../../quint-api/internal/crypto/testdata/fixture.json")
+	data, err := os.ReadFile("testdata/fixture.json")
 	if err != nil {
-		// Try relative to Quint root
-		data, err = os.ReadFile("/Users/amerabbadi/Quint/quint-api/internal/crypto/testdata/fixture.json")
-		if err != nil {
-			t.Fatalf("cannot load fixture: %v", err)
-		}
+		t.Fatalf("cannot load fixture: %v", err)
 	}
 	var f testFixture
 	if err := json.Unmarshal(data, &f); err != nil {
