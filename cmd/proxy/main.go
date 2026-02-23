@@ -88,7 +88,7 @@ func main() {
 	initAudit(dataDir, policy, &logEntry)
 
 	// Phase 3: Wire risk engine
-	initRisk(dataDir, &scoreTool, &evalRisk, &revoke)
+	initRisk(dataDir, policy, &scoreTool, &evalRisk, &revoke)
 
 	// Build relay callbacks
 	sn := *serverName
@@ -127,11 +127,18 @@ func handleParentMessage(
 	scoreTool scoreFunc,
 	evalRisk evalFunc,
 	revoke revokeFunc,
-) string {
-	// Fail-open: if our processing throws, forward the message
+) (out string) {
+	// On panic: forward (fail-open) or drop (fail-closed) depending on policy
+	failMode := policy.GetFailMode()
 	defer func() {
 		if r := recover(); r != nil {
-			qlog.Error("panic in parent message handler: %v", r)
+			if failMode == "open" {
+				qlog.Error("panic in parent message handler, forwarding (fail_mode=open): %v", r)
+				out = line
+			} else {
+				qlog.Error("panic in parent message handler, dropping (fail_mode=closed): %v", r)
+				out = ""
+			}
 		}
 	}()
 

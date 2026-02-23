@@ -38,12 +38,52 @@ type ServerPolicy struct {
 	Tools         []ToolRule `json:"tools"`
 }
 
+// RiskPatternConfig is a user-configurable risk pattern.
+type RiskPatternConfig struct {
+	Tool      string `json:"tool"`
+	BaseScore int    `json:"base_score"`
+}
+
+// RiskKeywordConfig is a user-configurable dangerous argument keyword.
+type RiskKeywordConfig struct {
+	Pattern string `json:"pattern"`
+	Boost   int    `json:"boost"`
+}
+
+// RiskConfig holds user-configurable risk scoring settings.
+type RiskConfig struct {
+	// Flag is the score at which actions are flagged for review (default 60).
+	Flag *int `json:"flag,omitempty"`
+	// Deny is the score at which actions are auto-denied (default 85).
+	Deny *int `json:"deny,omitempty"`
+	// RevokeAfter is the number of high-risk actions in window before revocation (default 5).
+	RevokeAfter *int `json:"revoke_after,omitempty"`
+	// WindowSeconds is the behavior tracking window in seconds (default 300).
+	WindowSeconds *int `json:"window_seconds,omitempty"`
+	// Patterns are custom tool risk patterns (checked before built-in defaults).
+	Patterns []RiskPatternConfig `json:"patterns,omitempty"`
+	// Keywords are custom dangerous argument keywords (added to built-in defaults).
+	Keywords []RiskKeywordConfig `json:"keywords,omitempty"`
+	// DisableBuiltins disables the built-in risk patterns and keywords when true.
+	DisableBuiltins bool `json:"disable_builtins,omitempty"`
+}
+
 // PolicyConfig is the top-level policy file structure.
 type PolicyConfig struct {
 	Version  int            `json:"version"`
 	DataDir  string         `json:"data_dir"`
 	LogLevel string         `json:"log_level"`
+	FailMode string         `json:"fail_mode,omitempty"` // "open" or "closed" (default "closed")
 	Servers  []ServerPolicy `json:"servers"`
+	Risk     *RiskConfig    `json:"risk,omitempty"`
+}
+
+// GetFailMode returns the effective fail mode, defaulting to "closed".
+func (p PolicyConfig) GetFailMode() string {
+	if p.FailMode == "open" {
+		return "open"
+	}
+	return "closed"
 }
 
 // DefaultPolicy returns a sensible default when no policy file exists.
