@@ -608,16 +608,22 @@ func applyGatewayConfig(servers []detectedServer, selfPath string) {
 	}
 	topServers["quint"] = quintEntry
 
-	// Remove detected servers from project-level configs
+	// Remove detected servers from project-level configs,
+	// but keep HTTP servers that have no stdio alternative (e.g., Notion)
 	if projects, ok := config["projects"].(map[string]any); ok {
 		for _, proj := range projects {
 			projMap, _ := proj.(map[string]any)
 			projServers, _ := projMap["mcpServers"].(map[string]any)
 			if projServers != nil {
 				for _, s := range servers {
-					if s.Source == "project" {
-						delete(projServers, s.Name)
+					if s.Source != "project" {
+						continue
 					}
+					// Keep HTTP servers that have no stdio alternative — they stay as direct connections
+					if s.Config.URL != "" && findStdioAlternative(s.Config.URL) == nil {
+						continue
+					}
+					delete(projServers, s.Name)
 				}
 			}
 		}
