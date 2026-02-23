@@ -183,7 +183,14 @@ func runInit(args []string) {
 	// Gateway mode: generate servers.json and replace all MCP entries with one "quint" entry
 	nonProxied := filterUnproxied(servers)
 	if len(nonProxied) == 0 {
-		fmt.Println("\n  All servers already proxied through Quint.")
+		// Check if servers.json already exists and has content
+		existingCfg, _ := gateway.LoadConfig(dataDir)
+		if existingCfg != nil && len(existingCfg.Servers) > 0 {
+			fmt.Printf("\n  All servers already proxied through Quint (%d servers configured).\n", len(existingCfg.Servers))
+			fmt.Println("\n  Setup complete.")
+			return
+		}
+		fmt.Println("\n  No MCP servers found to proxy.")
 		fmt.Println("\n  Setup complete.")
 		return
 	}
@@ -357,7 +364,7 @@ func parseMcpServer(m map[string]any) claudeMcpServer {
 }
 
 func isAlreadyProxied(srv claudeMcpServer) bool {
-	if strings.HasSuffix(srv.Command, "quint-proxy") || srv.Command == "quint" {
+	if strings.HasSuffix(srv.Command, "quint-proxy") || strings.HasSuffix(srv.Command, "/quint") || srv.Command == "quint" {
 		return true
 	}
 	// HTTP servers proxied through localhost with quint port range
