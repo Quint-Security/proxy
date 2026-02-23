@@ -13,7 +13,26 @@ import (
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
 )
 
-// runConnect handles: quint-proxy connect <add|list|remove|status|providers> [options]
+// runConnectShorthand handles: quint connect <provider> [options]
+// If the first arg is a known subcommand (add/list/remove/status/providers), route to full handler.
+// Otherwise treat it as a provider name and run the OAuth flow directly.
+func runConnectShorthand(args []string) {
+	if len(args) == 0 {
+		// No args — list connected services
+		runConnectList(nil)
+		return
+	}
+
+	switch args[0] {
+	case "add", "list", "remove", "status", "providers":
+		runConnect(args)
+	default:
+		// Treat as provider name: quint connect github
+		runConnectAdd(args)
+	}
+}
+
+// runConnect handles: quint connect <add|list|remove|status|providers> [options]
 func runConnect(args []string) {
 	if len(args) == 0 {
 		fmt.Fprintf(os.Stderr, "Usage: quint-proxy connect <add|list|remove|status|providers> [options]\n")

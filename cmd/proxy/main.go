@@ -31,8 +31,15 @@ func main() {
 	// Check for subcommands before flag parsing
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		// Primary commands
+		case "init":
+			runInit(os.Args[2:])
+			return
 		case "start":
 			runStart(os.Args[2:])
+			return
+		case "connect":
+			runConnectShorthand(os.Args[2:])
 			return
 		case "dashboard":
 			runDashboard(os.Args[2:])
@@ -40,17 +47,13 @@ func main() {
 		case "status":
 			runStatus(os.Args[2:])
 			return
-		case "init":
-			runInit(os.Args[2:])
-			return
-		case "http-proxy":
-			runHTTPProxy(os.Args[2:])
-			return
+
+		// Internal / advanced commands
 		case "agent":
 			runAgent(os.Args[2:])
 			return
-		case "approvals":
-			runApprovals(os.Args[2:])
+		case "verify":
+			runVerify(os.Args[2:])
 			return
 		case "approve":
 			runApprove(os.Args[2:])
@@ -58,14 +61,14 @@ func main() {
 		case "deny":
 			runDeny(os.Args[2:])
 			return
-		case "verify":
-			runVerify(os.Args[2:])
+		case "approvals":
+			runApprovals(os.Args[2:])
 			return
 		case "sync":
 			runSync(os.Args[2:])
 			return
-		case "connect":
-			runConnect(os.Args[2:])
+		case "http-proxy":
+			runHTTPProxy(os.Args[2:])
 			return
 		case "--version", "version":
 			fmt.Println(version)
@@ -79,15 +82,13 @@ func main() {
 	agentName := flag.String("agent", "", "Agent name for identity resolution (or set QUINT_AGENT)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Quint — RBAC & risk scoring for AI agents\n\n")
-		fmt.Fprintf(os.Stderr, "Commands:\n")
-		fmt.Fprintf(os.Stderr, "  quint-proxy init                  Setup wizard — detect agents, generate keys, create policy\n")
-		fmt.Fprintf(os.Stderr, "  quint-proxy dashboard             Open the web dashboard (agent management, audit, approvals)\n")
-		fmt.Fprintf(os.Stderr, "  quint-proxy status                Quick health check\n\n")
-		fmt.Fprintf(os.Stderr, "Proxy (used internally by init):\n")
-		fmt.Fprintf(os.Stderr, "  quint-proxy --name <server> [--agent <name>] -- <command> [args...]\n")
-		fmt.Fprintf(os.Stderr, "  quint-proxy http-proxy --name <server> --target <url> [--port <port>] [--auth]\n\n")
-		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "Quint — Security gateway for AI agents\n\n")
+		fmt.Fprintf(os.Stderr, "  quint init                  Detect MCP servers, generate keys, create config\n")
+		fmt.Fprintf(os.Stderr, "  quint start                 Run the gateway (all servers proxied through Quint)\n")
+		fmt.Fprintf(os.Stderr, "  quint connect <provider>    Connect an OAuth service (github, notion, sentry)\n")
+		fmt.Fprintf(os.Stderr, "  quint dashboard             Open the web dashboard\n")
+		fmt.Fprintf(os.Stderr, "  quint status                Quick health check\n")
+		fmt.Fprintf(os.Stderr, "  quint verify                Verify audit trail integrity\n\n")
 	}
 	flag.Parse()
 
