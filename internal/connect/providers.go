@@ -43,12 +43,14 @@ var Providers = map[string]Provider{
 	},
 	"slack": {
 		Name:         "Slack",
+		ClientID:     "10554967976323.10561366417170",
+		ClientSecret: "b0a7a0a0a360e50355439e2ee69f4c51",
 		AuthURL:      "https://slack.com/oauth/v2/authorize",
 		TokenURL:     "https://slack.com/api/oauth.v2.access",
 		CallbackPort: 7890,
-		DefaultScopes: []string{"chat:write", "channels:read"},
+		DefaultScopes: []string{"app_mentions:read", "bookmarks:read", "calls:read", "calls:write", "users:read", "files:read"},
 		Docs:         "https://api.slack.com/apps",
-		TLSCallback:  true, // Slack requires HTTPS callback
+		TLSCallback:  true,
 	},
 	"sentry": {
 		Name:          "Sentry",
