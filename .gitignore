@@ -1,5 +1,7 @@
 quint-proxy
+quint-riskservice
 dist/
 *.db
 *.db-wal
 *.db-shm
+proxy

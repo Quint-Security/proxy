@@ -6,6 +6,7 @@ BINARY  = quint-proxy
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) ./cmd/proxy/
+	go build $(LDFLAGS) -o quint-riskservice ./cmd/riskservice/
 
 build-all:
 	GOOS=linux   GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY)-linux-amd64   ./cmd/proxy/

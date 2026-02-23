@@ -27,11 +27,30 @@ type evalFunc func(score int) string
 type revokeFunc func(subjectID string) bool
 
 func main() {
+	// Check for subcommands before flag parsing
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "http-proxy":
+			runHTTPProxy(os.Args[2:])
+			return
+		case "init":
+			runInit(os.Args[2:])
+			return
+		case "--version", "version":
+			fmt.Println(version)
+			return
+		}
+	}
+
+	// Default: stdio proxy mode
 	serverName := flag.String("name", "", "MCP server name (used in audit log)")
 	policyPath := flag.String("policy", "", "Path to policy.json or directory containing it")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: quint-proxy --name <server> [--policy <path>] -- <command> [args...]\n\n")
+		fmt.Fprintf(os.Stderr, "Usage:\n")
+		fmt.Fprintf(os.Stderr, "  quint-proxy --name <server> [--policy <path>] -- <command> [args...]   (stdio proxy)\n")
+		fmt.Fprintf(os.Stderr, "  quint-proxy http-proxy --name <server> --target <url> [--port <port>]  (HTTP proxy)\n")
+		fmt.Fprintf(os.Stderr, "  quint-proxy init [--role <preset>] [--apply] [--revert]                (setup wizard)\n\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
