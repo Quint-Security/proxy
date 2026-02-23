@@ -492,6 +492,17 @@ func filterProxied(servers []detectedServer) []detectedServer {
 	return out
 }
 
+// stdioAlternatives maps HTTP MCP server URL patterns to their stdio MCP server equivalents.
+// When init detects an HTTP server matching a pattern, it uses the stdio version instead,
+// which lets the gateway manage auth via the credential vault.
+var stdioAlternatives = map[string]gateway.ServerConfig{
+	"githubcopilot.com": {
+		Command: "npx",
+		Args:    []string{"-y", "@modelcontextprotocol/server-github"},
+		Env:     map[string]string{"GITHUB_PERSONAL_ACCESS_TOKEN": "__CREDENTIAL:github__"},
+	},
+}
+
 func buildGatewayConfig(servers []detectedServer) gateway.Config {
 	cfg := gateway.Config{Servers: map[string]gateway.ServerConfig{}}
 	for _, s := range servers {
@@ -505,14 +516,36 @@ func buildGatewayConfig(servers []detectedServer) gateway.Config {
 			}
 			cfg.Servers[s.Name] = sc
 		} else if s.Config.URL != "" {
-			sc := gateway.ServerConfig{
-				URL:       s.Config.URL,
-				Transport: s.Config.Type,
+			// Check if there's a stdio alternative for this HTTP server
+			if alt := findStdioAlternative(s.Config.URL); alt != nil {
+				cfg.Servers[s.Name] = *alt
+			} else {
+				sc := gateway.ServerConfig{
+					URL:       s.Config.URL,
+					Transport: s.Config.Type,
+				}
+				cfg.Servers[s.Name] = sc
 			}
-			cfg.Servers[s.Name] = sc
 		}
 	}
 	return cfg
+}
+
+func findStdioAlternative(serverURL string) *gateway.ServerConfig {
+	for pattern, alt := range stdioAlternatives {
+		if strings.Contains(serverURL, pattern) {
+			copy := alt
+			// Deep copy the env map
+			if alt.Env != nil {
+				copy.Env = make(map[string]string, len(alt.Env))
+				for k, v := range alt.Env {
+					copy.Env[k] = v
+				}
+			}
+			return &copy
+		}
+	}
+	return nil
 }
 
 func saveOriginalConfig(dataDir string, servers []detectedServer) {
