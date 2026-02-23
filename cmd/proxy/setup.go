@@ -27,12 +27,32 @@ func runSetup(args []string) {
 	fmt.Println("[2/3] Connect services")
 	fmt.Println()
 
+	// Check which providers are already connected
+	store, _ := openCredStore("")
+	var connected map[string]bool
+	if store != nil {
+		connected = make(map[string]bool)
+		creds, _ := store.List()
+		for _, c := range creds {
+			if !store.IsExpired(c.ID) {
+				connected[c.ID] = true
+			}
+		}
+		store.Close()
+	}
+
 	// Offer providers that have built-in OAuth credentials
+	offered := 0
 	for _, name := range []string{"github", "notion", "sentry", "slack"} {
 		p := connect.Providers[name]
 		if p.ClientID == "" && p.ClientSecret == "" {
-			continue // no built-in credentials
+			continue
 		}
+		if connected[name] {
+			fmt.Printf("  %s — already connected\n", p.Name)
+			continue
+		}
+		offered++
 		fmt.Printf("  Connect %s? [Y/n] ", p.Name)
 		answer, _ := reader.ReadString('\n')
 		answer = strings.TrimSpace(strings.ToLower(answer))
@@ -41,6 +61,10 @@ func runSetup(args []string) {
 			fmt.Println()
 		}
 	}
+	if offered == 0 {
+		fmt.Println("  All providers already connected.")
+	}
+	fmt.Println()
 
 	// Step 3: Done
 	fmt.Println("[3/3] Setup complete!")
