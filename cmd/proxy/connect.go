@@ -154,10 +154,10 @@ func runConnectAdd(args []string) {
 	provider := connect.GetProvider(service)
 	if provider != nil {
 		if clientID == "" {
-			clientID = provider.ResolveClientID()
+			clientID = provider.ClientID
 		}
 		if clientSecret == "" {
-			clientSecret = provider.ResolveClientSecret()
+			clientSecret = provider.ClientSecret
 		}
 		if authURL == "" {
 			authURL = provider.AuthURL
