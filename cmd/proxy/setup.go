@@ -27,9 +27,11 @@ func runSetup(args []string) {
 	fmt.Println("[2/3] Connect services")
 	fmt.Println()
 
-	for name, p := range connect.Providers {
-		if p.ClientID == "" {
-			continue // skip providers without built-in OAuth
+	// Offer providers that have built-in OAuth credentials
+	for _, name := range []string{"github", "notion", "sentry", "slack"} {
+		p := connect.Providers[name]
+		if p.ClientID == "" && p.ClientSecret == "" {
+			continue // no built-in credentials
 		}
 		fmt.Printf("  Connect %s? [Y/n] ", p.Name)
 		answer, _ := reader.ReadString('\n')
