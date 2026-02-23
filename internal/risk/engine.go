@@ -2,6 +2,7 @@ package risk
 
 import (
 	"fmt"
+	"regexp"
 
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
 )
@@ -34,16 +35,20 @@ type Score struct {
 
 // Engine performs risk scoring for tool calls.
 type Engine struct {
-	thresholds     Thresholds
-	tracker        *BehaviorTracker
-	customPatterns []RiskPattern
+	thresholds      Thresholds
+	tracker         *BehaviorTracker
+	customPatterns  []RiskPattern
+	customKeywords  []ArgKeyword
+	disableBuiltins bool
 }
 
 // EngineOpts configures the risk engine.
 type EngineOpts struct {
-	Thresholds     *Thresholds
-	CustomPatterns []RiskPattern
-	BehaviorDB     *BehaviorDB
+	Thresholds      *Thresholds
+	CustomPatterns  []RiskPattern
+	CustomKeywords  []ArgKeyword
+	DisableBuiltins bool
+	BehaviorDB      *BehaviorDB
 }
 
 // NewEngine creates a new risk scoring engine.
@@ -55,16 +60,67 @@ func NewEngine(opts *EngineOpts) *Engine {
 
 	var db *BehaviorDB
 	var cp []RiskPattern
+	var ck []ArgKeyword
+	var disableBuiltins bool
 	if opts != nil {
 		db = opts.BehaviorDB
 		cp = opts.CustomPatterns
+		ck = opts.CustomKeywords
+		disableBuiltins = opts.DisableBuiltins
 	}
 
 	return &Engine{
-		thresholds:     t,
-		tracker:        NewBehaviorTracker(t.WindowMs, db),
-		customPatterns: cp,
+		thresholds:      t,
+		tracker:         NewBehaviorTracker(t.WindowMs, db),
+		customPatterns:  cp,
+		customKeywords:  ck,
+		disableBuiltins: disableBuiltins,
 	}
+}
+
+// NewEngineFromPolicy creates an engine configured from policy risk settings.
+func NewEngineFromPolicy(riskCfg *intercept.RiskConfig, behaviorDB *BehaviorDB) *Engine {
+	opts := &EngineOpts{BehaviorDB: behaviorDB}
+
+	if riskCfg != nil {
+		t := DefaultThresholds
+		if riskCfg.Flag != nil {
+			t.Flag = *riskCfg.Flag
+		}
+		if riskCfg.Deny != nil {
+			t.Deny = *riskCfg.Deny
+		}
+		if riskCfg.RevokeAfter != nil {
+			t.RevokeAfter = *riskCfg.RevokeAfter
+		}
+		if riskCfg.WindowSeconds != nil {
+			t.WindowMs = int64(*riskCfg.WindowSeconds) * 1000
+		}
+		opts.Thresholds = &t
+
+		for _, p := range riskCfg.Patterns {
+			opts.CustomPatterns = append(opts.CustomPatterns, RiskPattern{
+				Tool:      p.Tool,
+				BaseScore: p.BaseScore,
+			})
+		}
+
+		for _, k := range riskCfg.Keywords {
+			re, err := regexp.Compile("(?i)" + k.Pattern)
+			if err != nil {
+				continue
+			}
+			opts.CustomKeywords = append(opts.CustomKeywords, ArgKeyword{
+				Pattern: re,
+				Boost:   k.Boost,
+				Label:   k.Pattern,
+			})
+		}
+
+		opts.DisableBuiltins = riskCfg.DisableBuiltins
+	}
+
+	return NewEngine(opts)
 }
 
 // ScoreToolCall evaluates the risk of a tool call.
@@ -72,8 +128,13 @@ func (e *Engine) ScoreToolCall(toolName, argsJSON, subjectID string) Score {
 	reasons := make([]string, 0, 4)
 	baseScore := 20 // default for unknown tools
 
-	// Check custom patterns first, then defaults
-	allPatterns := append(e.customPatterns, DefaultToolRisks...)
+	// Check custom patterns first, then defaults (unless builtins disabled)
+	var allPatterns []RiskPattern
+	allPatterns = append(allPatterns, e.customPatterns...)
+	if !e.disableBuiltins {
+		allPatterns = append(allPatterns, DefaultToolRisks...)
+	}
+
 	matched := false
 	for _, p := range allPatterns {
 		if intercept.GlobMatch(p.Tool, toolName) {
@@ -87,13 +148,21 @@ func (e *Engine) ScoreToolCall(toolName, argsJSON, subjectID string) Score {
 		reasons = append(reasons, fmt.Sprintf(`tool "%s" — no pattern match, using default base score`, toolName))
 	}
 
-	// Argument analysis
+	// Argument analysis — custom keywords first, then builtins
 	argBoost := 0
 	if argsJSON != "" {
-		for _, kw := range DangerousArgKeywords {
+		for _, kw := range e.customKeywords {
 			if kw.Pattern.MatchString(argsJSON) {
 				argBoost += kw.Boost
 				reasons = append(reasons, fmt.Sprintf(`argument contains "%s" (+%d)`, kw.Label, kw.Boost))
+			}
+		}
+		if !e.disableBuiltins {
+			for _, kw := range DangerousArgKeywords {
+				if kw.Pattern.MatchString(argsJSON) {
+					argBoost += kw.Boost
+					reasons = append(reasons, fmt.Sprintf(`argument contains "%s" (+%d)`, kw.Label, kw.Boost))
+				}
 			}
 		}
 	}

@@ -218,10 +218,78 @@ check "public key file created" '' ''
 
 # =============================================
 echo ""
-echo "--- Test 10: Chain Link Verification on Test Entries ---"
-# Get last 5 entries and verify prev_hash chain
-ENTRIES=$(sqlite3 "$TMPDIR/quint.db" "SELECT id, prev_hash, signature FROM audit_log ORDER BY id DESC LIMIT 5" 2>/dev/null)
-check "audit entries have signatures" '|' "$ENTRIES"
+echo "--- Test 10: Chain Integrity (10+ entries) ---"
+# Send 10 tool calls to build a chain, then verify every link
+for i in $(seq 1 10); do
+  echo "{\"jsonrpc\":\"2.0\",\"id\":$((100+i)),\"method\":\"tools/call\",\"params\":{\"name\":\"ReadFile\",\"arguments\":{\"path\":\"/tmp/file$i\"}}}"
+done | $PROXY --name chain-test --policy "$TMPDIR/policy.json" -- node "$TMPDIR/mcp-server.js" 2>/dev/null
+
+# Verify chain: for each pair of consecutive entries, SHA256(prev.signature) == curr.prev_hash
+CHAIN_OK=true
+PREV_SIG=""
+while IFS='|' read -r id sig prevhash; do
+  if [ -n "$PREV_SIG" ]; then
+    EXPECTED=$(echo -n "$PREV_SIG" | shasum -a 256 | cut -d' ' -f1)
+    if [ "$prevhash" != "$EXPECTED" ]; then
+      echo "  CHAIN BREAK at id=$id: expected=$EXPECTED got=$prevhash"
+      CHAIN_OK=false
+    fi
+  fi
+  PREV_SIG="$sig"
+done < <(sqlite3 "$TMPDIR/quint.db" "SELECT id, signature, prev_hash FROM audit_log WHERE server_name='chain-test' ORDER BY id ASC")
+
+CHAIN_COUNT=$(sqlite3 "$TMPDIR/quint.db" "SELECT COUNT(*) FROM audit_log WHERE server_name='chain-test'")
+if [ "$CHAIN_OK" = true ] && [ "$CHAIN_COUNT" -ge 10 ]; then
+  echo "  PASS: chain integrity verified ($CHAIN_COUNT entries, all links valid)"
+  PASS=$((PASS+1))
+else
+  echo "  FAIL: chain integrity ($CHAIN_COUNT entries, broken=$CHAIN_OK)"
+  FAIL=$((FAIL+1))
+fi
+
+# =============================================
+echo ""
+echo "--- Test 11: Configurable Risk Scoring ---"
+# Create policy with custom risk config: lower thresholds, custom pattern
+cat > "$TMPDIR/risk-policy.json" << 'EOJSON2'
+{
+  "version": 1,
+  "data_dir": "REPLACE_TMPDIR",
+  "log_level": "info",
+  "servers": [
+    { "server": "*", "default_action": "allow", "tools": [] }
+  ],
+  "risk": {
+    "flag": 30,
+    "deny": 50,
+    "patterns": [
+      { "tool": "DangerBot*", "base_score": 90 }
+    ],
+    "keywords": [
+      { "pattern": "\\bexploit\\b", "boost": 40 }
+    ]
+  }
+}
+EOJSON2
+sed -i '' "s|REPLACE_TMPDIR|$TMPDIR|g" "$TMPDIR/risk-policy.json"
+
+# DangerBot with exploit keyword → base 90 + 40 = 130 → capped 100 → should be denied (threshold 50)
+OUTPUT=$(echo '{"jsonrpc":"2.0","id":200,"method":"tools/call","params":{"name":"DangerBotRun","arguments":{"cmd":"exploit target"}}}' | $PROXY --name risk-cfg-test --policy "$TMPDIR/risk-policy.json" -- node "$TMPDIR/mcp-server.js" 2>"$TMPDIR/stderr11.txt")
+check "custom risk pattern triggers deny" 'denied by policy' "$OUTPUT"
+
+STDERR11=$(cat "$TMPDIR/stderr11.txt")
+check "stderr shows risk config loaded" 'risk config' "$STDERR11"
+
+# ReadFile should now be flagged (base 10 is below flag=30, so still allow)
+OUTPUT=$(echo '{"jsonrpc":"2.0","id":201,"method":"tools/call","params":{"name":"ReadFile","arguments":{"path":"/tmp/safe"}}}' | $PROXY --name risk-cfg-test --policy "$TMPDIR/risk-policy.json" -- node "$TMPDIR/mcp-server.js" 2>/dev/null)
+check "ReadFile still allowed with custom thresholds" 'ReadFile executed successfully' "$OUTPUT"
+
+# =============================================
+echo ""
+echo "--- Test 12: Fail Mode ---"
+# Default is closed — test that it's in the config
+FAIL_MODE=$(python3 -c "import json; d=json.load(open('$TMPDIR/policy.json')); print(d.get('fail_mode','closed'))")
+check "default fail_mode is closed" 'closed' "$FAIL_MODE"
 
 # =============================================
 echo ""

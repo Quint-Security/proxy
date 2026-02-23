@@ -1,6 +1,10 @@
 package risk
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Quint-Security/quint-proxy/internal/intercept"
+)
 
 func newTestEngine(opts *EngineOpts) *Engine {
 	return NewEngine(opts)
@@ -160,6 +164,82 @@ func TestListToolsAreLowRisk(t *testing.T) {
 	}
 	if s.Level != "low" {
 		t.Errorf("ListFiles level: got %q, want low", s.Level)
+	}
+}
+
+func TestNewEngineFromPolicy(t *testing.T) {
+	flag40 := 40
+	deny70 := 70
+	revokeAfter := 3
+	window := 60
+
+	cfg := &intercept.RiskConfig{
+		Flag:        &flag40,
+		Deny:        &deny70,
+		RevokeAfter: &revokeAfter,
+		WindowSeconds: &window,
+		Patterns: []intercept.RiskPatternConfig{
+			{Tool: "CustomDanger*", BaseScore: 95},
+			{Tool: "SafeCustom*", BaseScore: 2},
+		},
+		Keywords: []intercept.RiskKeywordConfig{
+			{Pattern: `\bexploit\b`, Boost: 40},
+		},
+	}
+
+	e := NewEngineFromPolicy(cfg, nil)
+
+	// Custom pattern should match
+	s := e.ScoreToolCall("CustomDangerTool", "", "test")
+	if s.BaseScore != 95 {
+		t.Errorf("CustomDangerTool base: got %d, want 95", s.BaseScore)
+	}
+
+	// Custom thresholds: flag=40 means ReadFile (base=10) is still allow
+	s = e.ScoreToolCall("ReadFile", "", "test-thresh")
+	if e.Evaluate(s.Value) != "allow" {
+		t.Errorf("ReadFile should be allow with flag=40, got %s (score=%d)", e.Evaluate(s.Value), s.Value)
+	}
+
+	// Custom thresholds: deny=70 means WriteFile+dangerous (base=50+boost) could deny
+	s = e.ScoreToolCall("WriteFile", `{"cmd":"exploit this"}`, "test-deny")
+	if s.ArgBoost < 40 {
+		t.Errorf("exploit keyword should boost by 40, got %d", s.ArgBoost)
+	}
+
+	// Check thresholds were applied
+	th := e.GetThresholds()
+	if th.Flag != 40 || th.Deny != 70 || th.RevokeAfter != 3 {
+		t.Errorf("thresholds not applied: flag=%d deny=%d revoke=%d", th.Flag, th.Deny, th.RevokeAfter)
+	}
+}
+
+func TestDisableBuiltins(t *testing.T) {
+	cfg := &intercept.RiskConfig{
+		DisableBuiltins: true,
+		Patterns: []intercept.RiskPatternConfig{
+			{Tool: "OnlyThis", BaseScore: 99},
+		},
+	}
+
+	e := NewEngineFromPolicy(cfg, nil)
+
+	// OnlyThis matches custom pattern
+	s := e.ScoreToolCall("OnlyThis", "", "test")
+	if s.BaseScore != 99 {
+		t.Errorf("OnlyThis: got %d, want 99", s.BaseScore)
+	}
+
+	// DeleteFile would normally match builtin Delete* (80), but builtins disabled → default 20
+	s = e.ScoreToolCall("DeleteFile", "", "test")
+	if s.BaseScore != 20 {
+		t.Errorf("DeleteFile with builtins disabled: got %d, want 20", s.BaseScore)
+	}
+
+	// Keywords disabled too — "drop" should not boost
+	s = e.ScoreToolCall("WriteFile", `{"sql":"drop table"}`, "test")
+	if s.ArgBoost != 0 {
+		t.Errorf("argBoost with builtins disabled: got %d, want 0", s.ArgBoost)
 	}
 }
 
