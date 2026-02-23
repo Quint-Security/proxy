@@ -1,13 +1,19 @@
 package connect
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -35,6 +41,7 @@ type FlowOpts struct {
 	Scopes       []string
 	CallbackPort int
 	BasicAuth    bool              // Use Basic Auth for token exchange (Notion)
+	TLSCallback  bool              // Use HTTPS for callback (Slack)
 	ExtraParams  map[string]string // Extra auth URL params
 }
 
@@ -53,12 +60,16 @@ func RunOAuthFlow(opts FlowOpts) (*TokenResult, error) {
 	state := hex.EncodeToString(stateBytes)
 
 	// Start callback server
-	listener, err := startListener(opts.CallbackPort)
+	listener, err := startListener(opts.CallbackPort, opts.TLSCallback)
 	if err != nil {
 		return nil, fmt.Errorf("start callback server: %w", err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	redirectURI := fmt.Sprintf("http://localhost:%d/callback", port)
+	scheme := "http"
+	if opts.TLSCallback {
+		scheme = "https"
+	}
+	redirectURI := fmt.Sprintf("%s://localhost:%d/callback", scheme, port)
 
 	// Build auth URL
 	authURL, _ := url.Parse(opts.AuthURL)
@@ -96,9 +107,19 @@ func RunOAuthFlow(opts FlowOpts) (*TokenResult, error) {
 	return exchangeCode(opts.TokenURL, code, codeVerifier, redirectURI, opts.ClientID, opts.ClientSecret, opts.BasicAuth)
 }
 
-func startListener(fixedPort int) (net.Listener, error) {
+func startListener(fixedPort int, useTLS bool) (net.Listener, error) {
 	addr := fmt.Sprintf("127.0.0.1:%d", fixedPort)
-	return net.Listen("tcp", addr)
+	if !useTLS {
+		return net.Listen("tcp", addr)
+	}
+
+	// Generate self-signed cert for localhost TLS (Slack requires HTTPS callback)
+	cert, err := generateSelfSignedCert()
+	if err != nil {
+		return nil, fmt.Errorf("generate TLS cert: %w", err)
+	}
+	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}}
+	return tls.Listen("tcp", addr, tlsCfg)
 }
 
 func waitForCallback(listener net.Listener) (code, state string, err error) {
@@ -217,6 +238,34 @@ func exchangeCode(tokenURL, code, codeVerifier, redirectURI, clientID, clientSec
 	}
 
 	return &result, nil
+}
+
+func generateSelfSignedCert() (tls.Certificate, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "localhost"},
+		DNSNames:     []string{"localhost"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	return tls.Certificate{
+		Certificate: [][]byte{certDER},
+		PrivateKey:  key,
+	}, nil
 }
 
 func openBrowser(url string) {

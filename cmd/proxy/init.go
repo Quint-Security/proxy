@@ -501,6 +501,11 @@ var stdioAlternatives = map[string]gateway.ServerConfig{
 		Args:    []string{"-y", "@modelcontextprotocol/server-github"},
 		Env:     map[string]string{"GITHUB_PERSONAL_ACCESS_TOKEN": "__CREDENTIAL:github__"},
 	},
+	"sentry.dev": {
+		Command: "npx",
+		Args:    []string{"-y", "@sentry/mcp-server-sentry"},
+		Env:     map[string]string{"SENTRY_AUTH_TOKEN": "__CREDENTIAL:sentry__"},
+	},
 }
 
 func buildGatewayConfig(servers []detectedServer) gateway.Config {

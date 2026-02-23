@@ -184,10 +184,11 @@ func runConnectAdd(args []string) {
 			scopeList = provider.DefaultScopes
 		}
 
-		var basicAuth bool
+		var basicAuth, tlsCallback bool
 		var extraParams map[string]string
 		if provider != nil {
 			basicAuth = provider.BasicAuth
+			tlsCallback = provider.TLSCallback
 			extraParams = provider.ExtraParams
 		}
 
@@ -199,6 +200,7 @@ func runConnectAdd(args []string) {
 			Scopes:       scopeList,
 			CallbackPort: callbackPort,
 			BasicAuth:    basicAuth,
+			TLSCallback:  tlsCallback,
 			ExtraParams:  extraParams,
 		})
 		if err != nil {

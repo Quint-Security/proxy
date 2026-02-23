@@ -13,6 +13,7 @@ type Provider struct {
 	DefaultScopes []string         `json:"default_scopes"`
 	Docs         string            `json:"docs"`
 	BasicAuth    bool              `json:"basic_auth,omitempty"`
+	TLSCallback  bool             `json:"tls_callback,omitempty"` // Require HTTPS for callback (Slack)
 	ExtraParams  map[string]string `json:"extra_params,omitempty"`
 }
 
@@ -41,11 +42,13 @@ var Providers = map[string]Provider{
 		ExtraParams:  map[string]string{"owner": "user"},
 	},
 	"slack": {
-		Name:          "Slack",
-		AuthURL:       "https://slack.com/oauth/v2/authorize",
-		TokenURL:      "https://slack.com/api/oauth.v2.access",
+		Name:         "Slack",
+		AuthURL:      "https://slack.com/oauth/v2/authorize",
+		TokenURL:     "https://slack.com/api/oauth.v2.access",
+		CallbackPort: 7890,
 		DefaultScopes: []string{"chat:write", "channels:read"},
-		Docs:          "https://api.slack.com/apps",
+		Docs:         "https://api.slack.com/apps",
+		TLSCallback:  true, // Slack requires HTTPS callback
 	},
 	"sentry": {
 		Name:          "Sentry",
