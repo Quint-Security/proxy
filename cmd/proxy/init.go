@@ -285,57 +285,86 @@ func runRevert(dryRun bool) {
 	fmt.Printf("Reverted %d server(s). Restart Claude Code for changes to take effect.\n", reverted)
 }
 
+// mcpClient describes a known MCP client and its config file locations.
+type mcpClient struct {
+	Name        string
+	ConfigPaths []string // relative to home directory
+}
+
+// knownMCPClients lists all supported MCP clients and their config file paths.
+func knownMCPClients() []mcpClient {
+	return []mcpClient{
+		{Name: "Claude Code", ConfigPaths: []string{".claude.json"}},
+		{Name: "Cursor", ConfigPaths: []string{".cursor/mcp.json", "Library/Application Support/Cursor/User/globalStorage/cursor.mcp/mcp.json"}},
+		{Name: "Windsurf", ConfigPaths: []string{".windsurf/mcp.json", ".codeium/windsurf/mcp_config.json"}},
+		{Name: "Cline", ConfigPaths: []string{
+			"Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
+			".config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
+		}},
+	}
+}
+
 func detectMcpServers() []detectedServer {
 	home, _ := os.UserHomeDir()
-	configPath := filepath.Join(home, ".claude.json")
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil
-	}
-
-	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil
-	}
-
 	var servers []detectedServer
 	seen := map[string]bool{}
 
-	if mcpServers, ok := config["mcpServers"].(map[string]any); ok {
-		for name, srv := range mcpServers {
-			if seen[name] {
+	for _, client := range knownMCPClients() {
+		for _, relPath := range client.ConfigPaths {
+			configPath := filepath.Join(home, relPath)
+			data, err := os.ReadFile(configPath)
+			if err != nil {
 				continue
 			}
-			seen[name] = true
-			srvMap, _ := srv.(map[string]any)
-			cs := parseMcpServer(srvMap)
-			servers = append(servers, detectedServer{
-				Name: name, Config: cs, Source: "global",
-				AlreadyProxied: isAlreadyProxied(cs),
-			})
-		}
-	}
 
-	if projects, ok := config["projects"].(map[string]any); ok {
-		cwd, _ := os.Getwd()
-		for projPath, proj := range projects {
-			if !strings.HasPrefix(cwd, projPath) {
+			var config map[string]any
+			if err := json.Unmarshal(data, &config); err != nil {
 				continue
 			}
-			projMap, _ := proj.(map[string]any)
-			mcpServers, _ := projMap["mcpServers"].(map[string]any)
-			for name, srv := range mcpServers {
-				if seen[name] {
-					continue
+
+			fmt.Printf("  Detected %s (%s)\n", client.Name, relPath)
+
+			// Parse mcpServers at top level
+			if mcpServers, ok := config["mcpServers"].(map[string]any); ok {
+				for name, srv := range mcpServers {
+					if seen[name] {
+						continue
+					}
+					seen[name] = true
+					srvMap, _ := srv.(map[string]any)
+					cs := parseMcpServer(srvMap)
+					servers = append(servers, detectedServer{
+						Name: name, Config: cs, Source: "global",
+						AlreadyProxied: isAlreadyProxied(cs),
+					})
 				}
-				seen[name] = true
-				srvMap, _ := srv.(map[string]any)
-				cs := parseMcpServer(srvMap)
-				servers = append(servers, detectedServer{
-					Name: name, Config: cs, Source: "project",
-					AlreadyProxied: isAlreadyProxied(cs),
-				})
 			}
+
+			// Parse project-level servers (Claude Code specific)
+			if projects, ok := config["projects"].(map[string]any); ok {
+				cwd, _ := os.Getwd()
+				for projPath, proj := range projects {
+					if !strings.HasPrefix(cwd, projPath) {
+						continue
+					}
+					projMap, _ := proj.(map[string]any)
+					mcpServers, _ := projMap["mcpServers"].(map[string]any)
+					for name, srv := range mcpServers {
+						if seen[name] {
+							continue
+						}
+						seen[name] = true
+						srvMap, _ := srv.(map[string]any)
+						cs := parseMcpServer(srvMap)
+						servers = append(servers, detectedServer{
+							Name: name, Config: cs, Source: "project",
+							AlreadyProxied: isAlreadyProxied(cs),
+						})
+					}
+				}
+			}
+
+			break // found config for this client, don't check alternate paths
 		}
 	}
 

@@ -59,6 +59,13 @@ var Providers = map[string]Provider{
 		DefaultScopes: []string{"project:read", "event:read"},
 		Docs:          "https://sentry.io/settings/developer-settings/",
 	},
+	"linear": {
+		Name:          "Linear",
+		AuthURL:       "https://linear.app/oauth/authorize",
+		TokenURL:      "https://api.linear.app/oauth/token",
+		DefaultScopes: []string{"read", "write"},
+		Docs:          "https://linear.app/settings/api",
+	},
 }
 
 // GetProvider returns a known provider by name, or nil.
