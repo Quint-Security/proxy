@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -34,6 +35,7 @@ type TokenResult struct {
 
 // FlowOpts configures an OAuth PKCE flow.
 type FlowOpts struct {
+	Provider     string            // Provider name (for server-side exchange)
 	ClientID     string
 	ClientSecret string
 	AuthURL      string
@@ -43,6 +45,48 @@ type FlowOpts struct {
 	BasicAuth    bool              // Use Basic Auth for token exchange (Notion)
 	TLSCallback  bool              // Use HTTPS for callback (Slack)
 	ExtraParams  map[string]string // Extra auth URL params
+}
+
+// DefaultAPIURL is the Quint API endpoint for server-side OAuth exchange.
+const DefaultAPIURL = "https://api.quintsecurity.com"
+
+// exchangeViaAPI tries server-side token exchange through the Quint API.
+// Returns an error if the API is unreachable, in which case the caller
+// falls back to direct exchange.
+func exchangeViaAPI(provider, code, codeVerifier, redirectURI string) (*TokenResult, error) {
+	apiURL := os.Getenv("QUINT_API_URL")
+	if apiURL == "" {
+		apiURL = DefaultAPIURL
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"provider":      provider,
+		"code":          code,
+		"code_verifier": codeVerifier,
+		"redirect_uri":  redirectURI,
+	})
+
+	req, _ := http.NewRequest("POST", apiURL+"/v1/oauth/exchange", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err // API unreachable — caller falls back
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, respBody)
+	}
+
+	var result TokenResult
+	json.Unmarshal(respBody, &result)
+	if result.AccessToken == "" {
+		return nil, fmt.Errorf("no access_token from API")
+	}
+	return &result, nil
 }
 
 // RunOAuthFlow runs a full OAuth 2.0 PKCE authorization code flow.
@@ -102,8 +146,14 @@ func RunOAuthFlow(opts FlowOpts) (*TokenResult, error) {
 		return nil, fmt.Errorf("OAuth state mismatch — possible CSRF attack")
 	}
 
-	// Exchange code for tokens
+	// Exchange code for tokens — try server-side first, fall back to direct
 	fmt.Println("Exchanging authorization code for tokens...")
+	if opts.Provider != "" {
+		if result, err := exchangeViaAPI(opts.Provider, code, codeVerifier, redirectURI); err == nil {
+			return result, nil
+		}
+		// Fall through to direct exchange
+	}
 	return exchangeCode(opts.TokenURL, code, codeVerifier, redirectURI, opts.ClientID, opts.ClientSecret, opts.BasicAuth)
 }
 

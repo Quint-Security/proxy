@@ -193,6 +193,7 @@ func runConnectAdd(args []string) {
 		}
 
 		result, err := connect.RunOAuthFlow(connect.FlowOpts{
+			Provider:     service,
 			ClientID:     clientID,
 			ClientSecret: clientSecret,
 			AuthURL:      authURL,
