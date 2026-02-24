@@ -1,81 +1,53 @@
-# quint-proxy
+# Quint
 
-Go MCP proxy for AI agent tool call interception. Enforces policy, scores risk, and produces Ed25519-signed audit logs compatible with `quint verify` and `quint sync`.
+Security gateway for AI agents. Intercepts every tool call, enforces policy, scores risk, and produces cryptographically signed audit logs.
 
-## Build
-
-```bash
-make build          # local binary
-make build-all      # cross-compile for linux/darwin/windows (amd64 + arm64)
-make test           # run all tests
-make install        # install to $GOPATH/bin
-```
-
-## Usage
+## Quickstart
 
 ```bash
-quint-proxy --name <server-name> [--policy <path>] -- <command> [args...]
+brew install quint
+quint setup
+# Done. Quint is now proxying your MCP servers.
 ```
 
-### Example: Claude Code MCP server
+`quint setup` detects your MCP servers (Claude Code, Cursor, Windsurf, Cline), generates Ed25519 keys, creates a default policy, and wires everything up.
 
-In `claude.json`:
+## What it does
 
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "./quint-proxy",
-      "args": ["--name", "filesystem", "--", "npx", "@anthropic/mcp-fs"]
-    }
-  }
-}
-```
+- **Policy enforcement** — allow, deny, or flag tool calls per server using glob patterns
+- **Risk scoring** — built-in patterns detect dangerous arguments, track behavioral anomalies
+- **Signed audit trail** — every message gets an Ed25519 signature and SHA-256 hash chain
+- **Export proof bundles** — `quint export --last 7d` produces a standalone, verifiable audit file
 
-### Flags
-
-| Flag | Description |
-|------|-------------|
-| `--name` | MCP server name (required, used in audit log) |
-| `--policy` | Path to `policy.json` or directory containing it |
-| `--version` | Print version and exit |
-
-### Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `QUINT_DATA_DIR` | Override default data directory (`~/.quint`) |
-| `QUINT_PASSPHRASE` | Passphrase for encrypted Ed25519 private key |
-| `QUINT_RISK_SERVICE_URL` | Optional gRPC endpoint for ML risk scoring (e.g., `localhost:50051`) |
-
-## Architecture
+## How it works
 
 ```
-Parent (Claude) ←→ quint-proxy ←→ Child (MCP server)
-         stdin/stdout    stdin/stdout
+AI Agent (Claude, etc.)
+        |
+    quint proxy          ← policy check, risk score, audit log
+        |
+  MCP Server (filesystem, github, etc.)
 ```
 
-The proxy sits between the AI agent and the MCP server, intercepting all JSON-RPC messages on stdin/stdout:
+Quint sits between the AI agent and MCP servers on stdin/stdout. No code changes needed — it wraps existing server commands transparently.
 
-1. **Policy enforcement** — tool calls checked against `policy.json` (glob matching, first-match-wins)
-2. **Risk scoring** — built-in patterns + argument analysis + behavior tracking
-3. **Audit logging** — every message signed with Ed25519, chain-linked with SHA-256, stored in SQLite
-4. **Optional gRPC** — external ML risk service for enhanced scoring (100ms timeout, falls back to local)
+## Commands
 
-## Compatibility
+| Command | Description |
+|---------|-------------|
+| `quint setup` | Interactive setup wizard |
+| `quint start` | Run the gateway |
+| `quint status` | Health check |
+| `quint dashboard` | Open the web dashboard |
+| `quint export` | Export audit proof bundle |
+| `quint admin` | Advanced commands |
 
-Audit entries are byte-identical to the TypeScript CLI's format:
+## Links
 
-- Same SQLite schema (`quint.db`)
-- Same canonical JSON encoding
-- Same Ed25519 signing (PKCS8/SPKI PEM)
-- Same encrypted keystore format (`QUINT-ENC-V1`)
+- [Documentation](https://docs.quint.security)
+- [Discord](https://discord.gg/quint)
+- [Website](https://quint.security)
 
-Verify with: `quint verify --all` / `quint sync`
+## Contributing
 
-## Dependencies
-
-- `modernc.org/sqlite` — pure Go SQLite (no CGO)
-- `golang.org/x/crypto` — scrypt for encrypted keystore
-- `google.golang.org/grpc` — optional gRPC risk service client
-- Everything else is stdlib
+See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions and development guidelines.

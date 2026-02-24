@@ -273,6 +273,68 @@ func (d *DB) Stats() map[string]any {
 	return stats
 }
 
+// RangeOpts controls time-range queries with optional filters.
+type RangeOpts struct {
+	Since      string // RFC3339 timestamp (inclusive)
+	Until      string // RFC3339 timestamp (inclusive)
+	ServerName string
+	ToolName   string
+	Verdict    string
+}
+
+// GetRange returns entries within a time range in ascending order.
+func (d *DB) GetRange(opts RangeOpts) ([]Entry, error) {
+	where := "1=1"
+	args := []any{}
+
+	if opts.Since != "" {
+		where += " AND timestamp >= ?"
+		args = append(args, opts.Since)
+	}
+	if opts.Until != "" {
+		where += " AND timestamp <= ?"
+		args = append(args, opts.Until)
+	}
+	if opts.ServerName != "" {
+		where += " AND server_name = ?"
+		args = append(args, opts.ServerName)
+	}
+	if opts.ToolName != "" {
+		where += " AND tool_name LIKE ?"
+		args = append(args, "%"+opts.ToolName+"%")
+	}
+	if opts.Verdict != "" {
+		where += " AND verdict = ?"
+		args = append(args, opts.Verdict)
+	}
+
+	query := fmt.Sprintf(
+		`SELECT id, timestamp, server_name, direction, method, message_id, tool_name,
+		        arguments_json, response_json, verdict, risk_score, risk_level,
+		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name
+		 FROM audit_log WHERE %s ORDER BY id ASC`, where,
+	)
+
+	rows, err := d.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []Entry
+	for rows.Next() {
+		var e Entry
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.ServerName, &e.Direction, &e.Method,
+			&e.MessageID, &e.ToolName, &e.ArgumentsJSON, &e.ResponseJSON, &e.Verdict,
+			&e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce,
+			&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName); err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, nil
+}
+
 // Close closes the database.
 func (d *DB) Close() error {
 	return d.db.Close()

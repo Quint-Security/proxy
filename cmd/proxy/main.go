@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/Quint-Security/quint-proxy/internal/auth"
@@ -31,27 +32,40 @@ func main() {
 	// Check for subcommands before flag parsing
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		// Primary commands
+		// Primary commands — the ones a new user sees
 		case "setup":
 			runSetup(os.Args[2:])
-			return
-		case "init":
-			runInit(os.Args[2:])
 			return
 		case "start":
 			runStart(os.Args[2:])
 			return
-		case "connect":
-			runConnectShorthand(os.Args[2:])
+		case "status":
+			runStatus(os.Args[2:])
 			return
 		case "dashboard":
 			runDashboard(os.Args[2:])
 			return
-		case "status":
-			runStatus(os.Args[2:])
+		case "export":
+			runExport(os.Args[2:])
 			return
 
-		// Internal / advanced commands
+		// Admin — advanced commands behind a subcommand
+		case "admin":
+			runAdmin(os.Args[2:])
+			return
+
+		// Version
+		case "--version", "version":
+			fmt.Println(version)
+			return
+
+		// Backward compat: advanced commands still work without "admin" prefix
+		case "init":
+			runInit(os.Args[2:])
+			return
+		case "connect":
+			runConnectShorthand(os.Args[2:])
+			return
 		case "agent":
 			runAgent(os.Args[2:])
 			return
@@ -73,28 +87,41 @@ func main() {
 		case "http-proxy":
 			runHTTPProxy(os.Args[2:])
 			return
-		case "--version", "version":
-			fmt.Println(version)
-			return
 		}
 	}
 
-	// Default: stdio proxy mode
+	// No args: show status if configured, or setup prompt
+	if len(os.Args) == 1 {
+		home, _ := os.UserHomeDir()
+		quintDir := filepath.Join(home, ".quint")
+		if _, err := os.Stat(quintDir); err == nil {
+			runStatus(nil)
+		} else {
+			fmt.Println("Quint — Security gateway for AI agents")
+			fmt.Println()
+			fmt.Println("Run `quint setup` to get started.")
+		}
+		return
+	}
+
+	// Default: stdio proxy mode (with --name flag)
 	serverName := flag.String("name", "", "MCP server name (used in audit log)")
 	policyPath := flag.String("policy", "", "Path to policy.json or directory containing it")
 	agentName := flag.String("agent", "", "Agent name for identity resolution (or set QUINT_AGENT)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Quint — Security gateway for AI agents\n\n")
-		fmt.Fprintf(os.Stderr, "Getting started:\n")
-		fmt.Fprintf(os.Stderr, "  quint setup                 Interactive setup wizard (recommended)\n\n")
 		fmt.Fprintf(os.Stderr, "Commands:\n")
-		fmt.Fprintf(os.Stderr, "  quint init                  Detect MCP servers, generate keys, create config\n")
-		fmt.Fprintf(os.Stderr, "  quint start                 Run the gateway (all servers proxied through Quint)\n")
-		fmt.Fprintf(os.Stderr, "  quint connect <provider>    Connect an OAuth service (github, notion, sentry)\n")
-		fmt.Fprintf(os.Stderr, "  quint dashboard             Open the web dashboard\n")
-		fmt.Fprintf(os.Stderr, "  quint status                Quick health check\n")
-		fmt.Fprintf(os.Stderr, "  quint verify                Verify audit trail integrity\n\n")
+		fmt.Fprintf(os.Stderr, "  quint setup              Interactive setup wizard\n")
+		fmt.Fprintf(os.Stderr, "  quint start              Run the gateway\n")
+		fmt.Fprintf(os.Stderr, "  quint status             Health check\n")
+		fmt.Fprintf(os.Stderr, "  quint dashboard          Open the web dashboard\n")
+		fmt.Fprintf(os.Stderr, "  quint export             Export audit proof bundle\n\n")
+		fmt.Fprintf(os.Stderr, "Advanced:\n")
+		fmt.Fprintf(os.Stderr, "  quint admin <command>    Run an advanced command (quint admin --help)\n\n")
+		fmt.Fprintf(os.Stderr, "Stdio proxy mode:\n")
+		fmt.Fprintf(os.Stderr, "  quint --name <server> -- <command> [args...]\n\n")
+		fmt.Fprintf(os.Stderr, "https://github.com/Quint-Security/proxy\n")
 	}
 	flag.Parse()
 
