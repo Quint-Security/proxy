@@ -2,11 +2,14 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Quint-Security/quint-proxy/internal/connect"
+	"github.com/Quint-Security/quint-proxy/internal/gateway"
 )
 
 // runSetup handles: quint setup
@@ -66,6 +69,56 @@ func runSetup(args []string) {
 	}
 	fmt.Println()
 
+	// Step 2.5: Suggest MCP servers for connected providers that aren't configured
+	// Re-read connected providers (may have changed after connect step)
+	store2, dataDir := openCredStore("")
+	if store2 != nil {
+		connected = make(map[string]bool)
+		creds, _ := store2.List()
+		for _, c := range creds {
+			if !store2.IsExpired(c.ID) {
+				connected[c.ID] = true
+			}
+		}
+		store2.Close()
+
+		// Load current gateway servers
+		gatewayCfg, _ := gateway.LoadConfig(dataDir)
+		existingServers := map[string]bool{}
+		if gatewayCfg != nil {
+			for name := range gatewayCfg.Servers {
+				existingServers[name] = true
+			}
+		}
+
+		// Auto-add MCP servers for connected providers
+		added := 0
+		for provider, mcpCfg := range providerMCPServers {
+			if !connected[provider] {
+				continue
+			}
+			if existingServers[provider] {
+				continue
+			}
+			if gatewayCfg == nil {
+				gatewayCfg = &gateway.Config{Servers: map[string]gateway.ServerConfig{}}
+			}
+			gatewayCfg.Servers[provider] = mcpCfg
+			existingServers[provider] = true
+			added++
+			fmt.Printf("  Added %s MCP server to gateway\n", provider)
+		}
+
+		if added > 0 {
+			serversPath := filepath.Join(dataDir, "servers.json")
+			data, _ := json.MarshalIndent(gatewayCfg, "", "  ")
+			os.WriteFile(serversPath, append(data, '\n'), 0o644)
+			fmt.Printf("\n  Updated servers.json with %d new server(s).\n", added)
+			fmt.Println("  Restart Claude Code for changes to take effect.")
+		}
+	}
+	fmt.Println()
+
 	// Step 3: Done
 	fmt.Println("[3/3] Setup complete!")
 	fmt.Println()
@@ -78,4 +131,22 @@ func runSetup(args []string) {
 	fmt.Println("    quint verify       Verify audit trail integrity")
 	fmt.Println("    quint connect      See connected services")
 	fmt.Println()
+}
+
+// providerMCPServers maps OAuth provider names to their MCP server configurations.
+// When a provider is connected but has no matching MCP server, setup offers to add it.
+var providerMCPServers = map[string]gateway.ServerConfig{
+	"github": {
+		Command: "npx",
+		Args:    []string{"-y", "@modelcontextprotocol/server-github"},
+		Env:     map[string]string{"GITHUB_PERSONAL_ACCESS_TOKEN": "__CREDENTIAL:github__"},
+	},
+	// TODO: Slack MCP server requires SLACK_TEAM_ID in addition to the OAuth token.
+	// The connect flow needs to prompt for team ID after OAuth before we can auto-add this.
+	// "slack": { ... }
+	"sentry": {
+		Command: "npx",
+		Args:    []string{"-y", "@sentry/mcp-server-sentry"},
+		Env:     map[string]string{"SENTRY_AUTH_TOKEN": "__CREDENTIAL:sentry__"},
+	},
 }
