@@ -637,8 +637,13 @@ func applyGatewayConfig(servers []detectedServer, selfPath string) {
 	}
 	topServers["quint"] = quintEntry
 
-	// Remove detected servers from project-level configs,
-	// but keep HTTP servers that have no stdio alternative (e.g., Notion)
+	// Remove only the specific servers we detected and are moving to the gateway.
+	// Preserve everything else (user-added servers like shadcn, notion direct, etc.)
+	detected := map[string]bool{}
+	for _, s := range servers {
+		detected[s.Name] = true
+	}
+
 	if projects, ok := config["projects"].(map[string]any); ok {
 		for _, proj := range projects {
 			projMap, _ := proj.(map[string]any)
@@ -648,11 +653,14 @@ func applyGatewayConfig(servers []detectedServer, selfPath string) {
 					if s.Source != "project" {
 						continue
 					}
-					// Keep HTTP servers that have no stdio alternative — they stay as direct connections
+					// Keep HTTP servers that have no stdio alternative
 					if s.Config.URL != "" && findStdioAlternative(s.Config.URL) == nil {
 						continue
 					}
-					delete(projServers, s.Name)
+					// Only remove servers we detected — leave user-added ones alone
+					if detected[s.Name] {
+						delete(projServers, s.Name)
+					}
 				}
 			}
 		}
