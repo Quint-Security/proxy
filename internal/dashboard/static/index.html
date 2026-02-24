@@ -3,49 +3,48 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Quint</title>
+<title>Quint Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://api.fontshare.com/v2/css?f[]=switzer@1,2&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #07080a; --surface: #0d0f12; --surface-2: #13161b; --border: #1c2028;
-  --text: #c8ccd4; --text-bright: #e8ecf4; --muted: #5c6370;
-  --green: #00d67e; --green-dim: rgba(0,214,126,0.12); --green-glow: rgba(0,214,126,0.06);
-  --red: #ff4757; --red-dim: rgba(255,71,87,0.12);
-  --amber: #ffb830; --amber-dim: rgba(255,184,48,0.12);
-  --blue: #4a9eff; --blue-dim: rgba(74,158,255,0.12);
-  --purple: #a78bfa; --purple-dim: rgba(167,139,250,0.12);
-  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
-  --font-sans: 'Outfit', -apple-system, sans-serif;
+  --bg: #000000; --surface: #0A0A0A; --surface-2: #141414; --border: rgba(255,255,255,0.06);
+  --border-hover: rgba(255,255,255,0.15); --dim: rgba(255,255,255,0.04);
+  --text: #FFFFFF; --text-2: #A0A0A0; --text-3: #666666;
+  --green: #00ffc8; --green-dim: rgba(0,255,200,0.08);
+  --red: #ff4f5e; --red-dim: rgba(255,79,94,0.1);
+  --amber: #ffb340; --amber-dim: rgba(255,179,64,0.1);
+  --blue: #4a9eff; --blue-dim: rgba(74,158,255,0.1);
+  --purple: #a78bfa; --purple-dim: rgba(167,139,250,0.1);
+  --sans: 'Switzer', -apple-system, system-ui, sans-serif;
+  --mono: 'DM Mono', 'SF Mono', ui-monospace, monospace;
 }
 *{margin:0;padding:0;box-sizing:border-box}
 ::selection{background:var(--green);color:var(--bg)}
-body{font-family:var(--font-mono);background:var(--bg);color:var(--text);font-size:13px;overflow:hidden;height:100vh}
-
-/* Scanline overlay */
-body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;
-  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.03) 2px,rgba(0,0,0,0.03) 4px)}
+body{font-family:var(--mono);background:var(--bg);color:var(--text-2);font-size:13px;overflow:hidden;height:100vh;-webkit-font-smoothing:antialiased}
 
 /* Layout */
 .shell{display:grid;grid-template-columns:56px 1fr;grid-template-rows:48px 1fr;height:100vh}
 
 /* Top bar */
-.topbar{grid-column:1/-1;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:16px;z-index:10}
-.topbar .logo{font-family:var(--font-sans);font-weight:700;font-size:16px;letter-spacing:-0.5px;color:var(--text-bright);display:flex;align-items:center;gap:8px}
-.topbar .logo .mark{width:24px;height:24px;border-radius:6px;background:linear-gradient(135deg,var(--green),#00b368);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--bg)}
-.topbar .sep{width:1px;height:20px;background:var(--border)}
-.topbar .status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.topbar{grid-column:1/-1;background:rgba(5,5,8,0.85);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:16px;z-index:10}
+.topbar .logo{font-family:var(--mono);font-size:13px;font-weight:500;letter-spacing:0.15em;text-transform:uppercase;color:var(--text)}
+.topbar .logo b{font-weight:700}
+.topbar .sep{width:1px;height:18px;background:var(--border)}
+.topbar .status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-3)}
 .topbar .dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
 .topbar .right{margin-left:auto;display:flex;align-items:center;gap:12px}
-.topbar .counter{font-family:var(--font-mono);font-size:11px;color:var(--muted);padding:4px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:4px}
+.topbar .counter{font-family:var(--mono);font-size:11px;color:var(--text-3);padding:4px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px}
 
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
 
 /* Sidebar */
 .sidebar{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:2px}
-.sidebar a{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:8px;color:var(--muted);transition:all 0.15s;cursor:pointer;text-decoration:none;position:relative}
-.sidebar a:hover{background:var(--surface-2);color:var(--text)}
-.sidebar a.active{color:var(--green);background:var(--green-glow)}
+.sidebar a{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:8px;color:var(--text-3);transition:all 0.2s;cursor:pointer;text-decoration:none;position:relative}
+.sidebar a:hover{background:var(--dim);color:var(--text-2)}
+.sidebar a.active{color:var(--green);background:var(--green-dim)}
 .sidebar a.active::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:2px;height:16px;background:var(--green);border-radius:0 2px 2px 0}
 .sidebar a svg{width:18px;height:18px}
 .sidebar .spacer{flex:1}
@@ -53,71 +52,76 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;
 
 /* Main content */
 main{overflow-y:auto;padding:24px 28px;background:var(--bg)}
-main::-webkit-scrollbar{width:6px}
-main::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+main::-webkit-scrollbar{width:5px}
+main::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:3px}
 main::-webkit-scrollbar-track{background:transparent}
 
 /* Page header */
 .page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
-.page-header h1{font-family:var(--font-sans);font-size:20px;font-weight:600;color:var(--text-bright);letter-spacing:-0.3px}
+.page-header h1{font-family:var(--sans);font-size:20px;font-weight:300;color:var(--text);letter-spacing:-0.01em}
 .page-header .actions{display:flex;gap:8px}
 
 /* Stats grid */
-.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border);border-radius:10px;overflow:hidden;margin-bottom:24px}
-.stat{background:var(--surface);padding:16px 18px;position:relative;overflow:hidden}
-.stat::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--border)}
-.stat .label{font-size:10px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);margin-bottom:8px;font-family:var(--font-sans);font-weight:500}
-.stat .value{font-size:28px;font-weight:700;color:var(--text-bright);line-height:1;font-variant-numeric:tabular-nums}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px;transition:border-color 0.2s}
+.stat:hover{border-color:var(--border-hover)}
+.stat .label{font-size:0.6rem;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-3);margin-bottom:8px;font-family:var(--mono);font-weight:400}
+.stat .value{font-family:var(--sans);font-size:28px;font-weight:300;color:var(--text);line-height:1;font-variant-numeric:tabular-nums}
 .stat .value.green{color:var(--green)}.stat .value.red{color:var(--red)}.stat .value.amber{color:var(--amber)}
 
-/* Activity feed */
+/* Feed / Section */
 .feed{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}
 .feed-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
-.feed-header h2{font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--text-bright)}
-.feed-header .live{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--green);text-transform:uppercase;letter-spacing:1px;font-weight:600}
+.feed-header h2{font-family:var(--sans);font-size:13px;font-weight:400;color:var(--text)}
+.feed-header .live{display:flex;align-items:center;gap:6px;font-size:0.6rem;color:var(--green);text-transform:uppercase;letter-spacing:1.5px;font-weight:500;font-family:var(--mono)}
 .feed-header .live .dot{width:5px;height:5px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
 
 /* Table */
 table{width:100%;border-collapse:collapse}
-th{text-align:left;padding:10px 14px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:500;border-bottom:1px solid var(--border);font-family:var(--font-sans);position:sticky;top:0;background:var(--surface);z-index:1}
-td{padding:10px 14px;border-bottom:1px solid rgba(28,32,40,0.5);font-size:12px;vertical-align:middle}
-tr{transition:background 0.1s}
-tr:hover td{background:rgba(255,255,255,0.015)}
-.mono{font-family:var(--font-mono)}
+th{text-align:left;padding:10px 14px;font-size:0.6rem;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-3);font-weight:400;border-bottom:1px solid var(--border);font-family:var(--mono);position:sticky;top:0;background:var(--surface);z-index:1}
+td{padding:10px 14px;border-bottom:1px solid var(--dim);font-size:12px;vertical-align:middle}
+tr{transition:background 0.15s}
+tr:hover td{background:var(--dim)}
 
 /* Tags */
-.tag{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:600;letter-spacing:0.3px;font-family:var(--font-sans);text-transform:uppercase}
+.tag{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:20px;font-size:0.6rem;font-weight:500;letter-spacing:0.5px;font-family:var(--mono);text-transform:uppercase}
 .tag-green{background:var(--green-dim);color:var(--green)}
 .tag-red{background:var(--red-dim);color:var(--red)}
 .tag-amber{background:var(--amber-dim);color:var(--amber)}
 .tag-blue{background:var(--blue-dim);color:var(--blue)}
 .tag-purple{background:var(--purple-dim);color:var(--purple)}
-.tag-muted{background:rgba(92,99,112,0.15);color:var(--muted)}
-.tag .indicator{width:5px;height:5px;border-radius:50%;background:currentColor}
+.tag-muted{background:rgba(102,102,102,0.12);color:var(--text-3)}
+
+/* Risk bar */
+.risk-bar{display:inline-flex;align-items:center;gap:6px}
+.risk-bar .bar{width:40px;height:4px;background:var(--surface-2);border-radius:2px;overflow:hidden}
+.risk-bar .bar-fill{height:100%;border-radius:2px;transition:width 0.6s ease}
+.risk-bar .bar-fill.lo{background:var(--green)}.risk-bar .bar-fill.md{background:var(--amber)}.risk-bar .bar-fill.hi{background:var(--red)}
 
 /* Buttons */
-.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:6px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:12px;font-family:var(--font-mono);cursor:pointer;transition:all 0.15s}
-.btn:hover{border-color:var(--green);color:var(--text-bright)}
-.btn-primary{background:var(--green);border-color:var(--green);color:var(--bg);font-weight:600}
-.btn-primary:hover{opacity:0.9;transform:translateY(-1px)}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text-2);font-size:12px;font-family:var(--mono);cursor:pointer;transition:all 0.2s}
+.btn:hover{border-color:var(--border-hover);color:var(--text)}
+.btn-primary{background:var(--text);border-color:var(--text);color:var(--bg);font-weight:500}
+.btn-primary:hover{opacity:0.9}
 .btn-danger{border-color:var(--red);color:var(--red)}
 .btn-danger:hover{background:var(--red-dim)}
 .btn-sm{padding:4px 10px;font-size:11px}
 
 /* Filters */
 .filters{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
-input,select{background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:7px 12px;color:var(--text);font-size:12px;font-family:var(--font-mono);outline:none;transition:border-color 0.15s}
+input,select{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:7px 12px;color:var(--text);font-size:12px;font-family:var(--mono);outline:none;transition:border-color 0.2s}
 input:focus,select:focus{border-color:var(--green)}
-input::placeholder{color:var(--muted)}
+input::placeholder{color:var(--text-3)}
+option{background:var(--surface);color:var(--text)}
 
 /* Pagination */
 .pagination{display:flex;justify-content:space-between;align-items:center;padding:12px 0}
-.pagination .info{font-size:11px;color:var(--muted)}
+.pagination .info{font-size:11px;color:var(--text-3)}
 
 /* Section */
 .section{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px}
 .section-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
-.section-header h2{font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--text-bright)}
+.section-header h2{font-family:var(--sans);font-size:13px;font-weight:400;color:var(--text)}
 .section-body{padding:16px 18px}
 
 /* Create agent form */
@@ -125,49 +129,51 @@ input::placeholder{color:var(--muted)}
 .create-form.show{display:block;animation:slideDown 0.2s ease}
 @keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
 .form-row{display:flex;gap:10px;margin-bottom:10px;align-items:center}
-.form-row label{font-size:11px;color:var(--muted);min-width:60px;text-transform:uppercase;letter-spacing:0.5px;font-family:var(--font-sans);font-weight:500}
+.form-row label{font-size:0.6rem;color:var(--text-3);min-width:60px;text-transform:uppercase;letter-spacing:1px;font-family:var(--mono)}
 .form-row input,.form-row select{flex:1}
 .key-display{background:var(--bg);border:1px solid var(--green);border-radius:8px;padding:14px;margin-top:14px;font-size:11px;word-break:break-all;color:var(--green);line-height:1.6}
 
 /* Approval card */
-.approval-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:flex-start;transition:border-color 0.15s}
+.approval-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:flex-start;transition:border-color 0.2s}
 .approval-card:hover{border-color:var(--amber)}
 .approval-card .meta{display:flex;flex-direction:column;gap:6px}
-.approval-card .meta .tool{font-family:var(--font-mono);font-size:14px;font-weight:600;color:var(--text-bright)}
-.approval-card .meta .details{font-size:11px;color:var(--muted);display:flex;gap:12px}
-.approval-card .meta .id{font-size:10px;color:var(--muted);font-family:var(--font-mono)}
+.approval-card .meta .tool{font-family:var(--mono);font-size:14px;font-weight:500;color:var(--text)}
+.approval-card .meta .details{font-size:11px;color:var(--text-3);display:flex;gap:12px}
+.approval-card .meta .id{font-size:10px;color:var(--text-3);font-family:var(--mono)}
 .approval-card .actions{display:flex;gap:8px;flex-shrink:0}
 
 /* Policy viewer */
 .policy-viewer{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}
-.policy-viewer pre{padding:20px;font-size:12px;line-height:1.7;color:var(--text);white-space:pre-wrap;max-height:calc(100vh - 200px);overflow:auto}
-.policy-viewer pre::-webkit-scrollbar{width:6px}
-.policy-viewer pre::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.policy-viewer pre{padding:20px;font-size:12px;line-height:1.8;color:var(--text-2);white-space:pre-wrap;max-height:calc(100vh - 200px);overflow:auto}
 
 /* Empty state */
-.empty{text-align:center;padding:48px 24px;color:var(--muted);font-size:12px}
-.empty .icon{font-size:32px;margin-bottom:12px;opacity:0.3}
+.empty{text-align:center;padding:48px 24px;color:var(--text-3);font-size:12px}
+.empty .icon{font-size:32px;margin-bottom:12px;opacity:0.15}
+.waiting{animation:waitPulse 3s ease-in-out infinite}
+@keyframes waitPulse{0%,100%{opacity:0.4}50%{opacity:1}}
 
 /* Page transitions */
-.tab{display:none;animation:fadeIn 0.15s ease}
+.tab{display:none;animation:fadeIn 0.2s ease}
 .tab.active{display:block}
-@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 
-/* Connected services */
+/* Services */
 .service-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
 .service-row:last-child{border-bottom:none}
-.service-icon{width:32px;height:32px;border-radius:8px;background:var(--surface-2);display:flex;align-items:center;justify-content:center;font-size:14px}
+.service-icon{width:32px;height:32px;border-radius:8px;background:var(--surface-2);display:flex;align-items:center;justify-content:center;font-size:11px;font-family:var(--mono);color:var(--text-3)}
 .service-info{flex:1}
-.service-info .name{font-weight:600;color:var(--text-bright);font-size:13px}
-.service-info .scopes{font-size:11px;color:var(--muted);margin-top:2px}
+.service-info .name{font-weight:500;color:var(--text);font-size:13px;font-family:var(--sans)}
+.service-info .scopes{font-size:11px;color:var(--text-3);margin-top:2px}
+
+/* New entry highlight */
+.new-entry td{background:var(--green-dim) !important}
 </style>
 </head>
 <body>
 
-<!-- Top Bar -->
 <div class="shell">
 <div class="topbar">
-  <div class="logo"><div class="mark">Q</div>Quint</div>
+  <div class="logo"><b>Q</b>UINT</div>
   <div class="sep"></div>
   <div class="status"><span class="dot"></span>Gateway active</div>
   <div class="right">
@@ -175,7 +181,6 @@ input::placeholder{color:var(--muted)}
   </div>
 </div>
 
-<!-- Sidebar -->
 <div class="sidebar">
   <a href="#" class="active" data-tab="overview" title="Overview">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
@@ -189,16 +194,15 @@ input::placeholder{color:var(--muted)}
   <a href="#" data-tab="approvals" title="Approvals" id="nav-approvals">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
   </a>
-  <a href="#" data-tab="services" title="Connected Services">
+  <div class="spacer"></div>
+  <a href="#" data-tab="services" title="Services">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
   </a>
-  <div class="spacer"></div>
   <a href="#" data-tab="policy" title="Policy">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
   </a>
 </div>
 
-<!-- Main Content -->
 <main>
   <!-- Overview -->
   <div id="tab-overview" class="tab active">
@@ -209,7 +213,7 @@ input::placeholder{color:var(--muted)}
         <h2>Recent Activity</h2>
         <div class="live"><span class="dot"></span>Live</div>
       </div>
-      <table><thead><tr><th>Time</th><th>Server</th><th>Tool</th><th>Verdict</th><th>Agent</th><th>Risk</th></tr></thead><tbody id="recent-activity"></tbody></table>
+      <table><thead><tr><th>Time</th><th>Server</th><th>Tool</th><th>Verdict</th><th>Risk</th><th>Agent</th></tr></thead><tbody id="recent-activity"></tbody></table>
     </div>
   </div>
 
@@ -217,10 +221,10 @@ input::placeholder{color:var(--muted)}
   <div id="tab-audit" class="tab">
     <div class="page-header"><h1>Audit Log</h1></div>
     <div class="filters">
-      <select id="f-verdict"><option value="">All verdicts</option><option value="allow">allow</option><option value="deny">deny</option><option value="passthrough">passthrough</option><option value="scope_denied">scope_denied</option><option value="approval_pending">approval_pending</option><option value="rate_limited">rate_limited</option></select>
-      <input id="f-tool" placeholder="Filter by tool...">
-      <input id="f-agent" placeholder="Filter by agent...">
-      <button class="btn" onclick="loadAudit()">Apply</button>
+      <select id="f-verdict"><option value="">All verdicts</option><option value="allow">allow</option><option value="deny">deny</option><option value="passthrough">passthrough</option><option value="scope_denied">scope denied</option><option value="approval_pending">pending</option><option value="rate_limited">rate limited</option></select>
+      <input id="f-tool" placeholder="Filter tool...">
+      <input id="f-agent" placeholder="Filter agent...">
+      <button class="btn btn-sm" onclick="loadAudit()">Apply</button>
     </div>
     <div class="feed">
       <table><thead><tr><th>#</th><th>Time</th><th>Dir</th><th>Method</th><th>Tool</th><th>Verdict</th><th>Risk</th><th>Agent</th></tr></thead><tbody id="audit-rows"></tbody></table>
@@ -234,7 +238,7 @@ input::placeholder{color:var(--muted)}
     <div class="create-form" id="create-form">
       <div class="form-row"><label>Name</label><input id="a-name" placeholder="research-bot"></div>
       <div class="form-row"><label>Type</label><input id="a-type" value="generic" placeholder="generic"></div>
-      <div class="form-row"><label>Scopes</label><select id="a-scopes"><option value="tools:read">tools:read</option><option value="tools:write">tools:write</option><option value="tools:execute">tools:execute</option><option value="tools:admin">tools:admin</option><option value="tools:read,tools:write">tools:read + tools:write</option><option value="tools:admin,tools:execute">tools:admin + tools:execute</option></select></div>
+      <div class="form-row"><label>Scopes</label><select id="a-scopes"><option value="tools:read">tools:read</option><option value="tools:write">tools:write</option><option value="tools:execute">tools:execute</option><option value="tools:admin">tools:admin</option><option value="tools:read,tools:write">read + write</option><option value="tools:admin,tools:execute">admin + execute</option></select></div>
       <div class="form-row"><label>Desc</label><input id="a-desc" placeholder="What does this agent do?"></div>
       <div style="display:flex;gap:8px;margin-top:4px"><button class="btn btn-primary" onclick="createAgent()">Create Agent</button><button class="btn" onclick="toggleCreate()">Cancel</button></div>
       <div id="new-key"></div>
@@ -250,36 +254,32 @@ input::placeholder{color:var(--muted)}
     <div id="approval-list"></div>
   </div>
 
-  <!-- Connected Services -->
+  <!-- Services -->
   <div id="tab-services" class="tab">
     <div class="page-header"><h1>Connected Services</h1></div>
-    <div class="section" id="services-list">
-      <div class="section-body" id="services-body"></div>
-    </div>
+    <div class="section"><div class="section-body" id="services-body"></div></div>
   </div>
 
   <!-- Policy -->
   <div id="tab-policy" class="tab">
-    <div class="page-header"><h1>Policy Configuration</h1></div>
+    <div class="page-header"><h1>Policy</h1></div>
     <div class="policy-viewer"><pre id="policy-json"></pre></div>
   </div>
 </main>
 </div>
 
 <script>
-const API = '';
-let auditOffset = 0;
-const LIMIT = 50;
+const API='';let auditOffset=0;const LIMIT=50;
 
 // Navigation
-document.querySelectorAll('.sidebar a[data-tab]').forEach(a => {
-  a.addEventListener('click', e => {
+document.querySelectorAll('.sidebar a[data-tab]').forEach(a=>{
+  a.addEventListener('click',e=>{
     e.preventDefault();
-    document.querySelectorAll('.sidebar a').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.sidebar a').forEach(x=>x.classList.remove('active'));
     a.classList.add('active');
-    document.querySelectorAll('.tab').forEach(d => d.classList.remove('active'));
-    document.getElementById('tab-' + a.dataset.tab).classList.add('active');
-    const t = a.dataset.tab;
+    document.querySelectorAll('.tab').forEach(d=>d.classList.remove('active'));
+    document.getElementById('tab-'+a.dataset.tab).classList.add('active');
+    const t=a.dataset.tab;
     if(t==='audit')loadAudit();if(t==='agents')loadAgents();if(t==='approvals')loadApprovals();
     if(t==='policy')loadPolicy();if(t==='overview')loadOverview();if(t==='services')loadServices();
   });
@@ -287,24 +287,28 @@ document.querySelectorAll('.sidebar a[data-tab]').forEach(a => {
 
 // Helpers
 function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
-function tag(text,cls){return`<span class="tag tag-${cls}"><span class="indicator"></span>${esc(text)}</span>`}
+function tag(text,cls){return`<span class="tag tag-${cls}">${esc(text)}</span>`}
 function verdictTag(v){
   const m={allow:'green',passthrough:'blue',deny:'red',scope_denied:'red',flag_denied:'amber',rate_limited:'amber',approval_pending:'amber',approved:'green'};
-  return tag(v,m[v]||'muted');
+  return tag(v.replace('_',' '),m[v]||'muted');
 }
-function riskTag(s,l){
-  if(s==null)return'<span class="tag tag-muted">--</span>';
-  const m={low:'green',medium:'amber',high:'red',critical:'red'};
-  return tag(s+' '+(l||''),m[l]||'muted');
+function riskDisplay(s,l){
+  if(s==null)return'<span style="color:var(--text-3)">--</span>';
+  const cls=s<30?'lo':s<60?'md':'hi';
+  const color=s<30?'var(--green)':s<60?'var(--amber)':'var(--red)';
+  return`<span class="risk-bar"><span class="bar"><span class="bar-fill ${cls}" style="width:${s}%"></span></span><span style="color:${color};font-size:11px">${s}</span></span>`;
 }
 function statusTag(s){return tag(s,{active:'green',suspended:'amber',revoked:'red'}[s]||'muted')}
+function timeAgo(ts){
+  if(!ts)return'--';const s=Math.floor((Date.now()-new Date(ts).getTime())/1000);
+  if(s<5)return'now';if(s<60)return s+'s';const m=Math.floor(s/60);
+  if(m<60)return m+'m';const h=Math.floor(m/60);if(h<24)return h+'h';return Math.floor(h/24)+'d';
+}
 function timeStr(ts){
-  if(!ts)return'--';const d=new Date(ts);
-  return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  if(!ts)return'--';return new Date(ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
 }
 function dateStr(ts){
-  if(!ts)return'--';const d=new Date(ts);
-  return d.toLocaleDateString([],{month:'short',day:'numeric',year:'numeric'});
+  if(!ts)return'--';return new Date(ts).toLocaleDateString([],{month:'short',day:'numeric'});
 }
 async function api(p,o){const r=await fetch(API+p,o);return r.json()}
 
@@ -319,19 +323,20 @@ async function loadOverview(){
     <div class="stat"><div class="label">Active Agents</div><div class="value green">${d.agents_active||0}</div></div>
     <div class="stat"><div class="label">Pending</div><div class="value ${(d.approvals_pending||0)>0?'amber':''}">${d.approvals_pending||0}</div></div>`;
   if((d.approvals_pending||0)>0){
-    document.getElementById('nav-approvals').innerHTML+=`<span class="badge-count">${d.approvals_pending}</span>`;
+    const nav=document.getElementById('nav-approvals');
+    if(!nav.querySelector('.badge-count'))nav.innerHTML+=`<span class="badge-count">${d.approvals_pending}</span>`;
   }
   const audit=await api('/api/audit?limit=12');
   const rows=(audit.entries||[]).filter(e=>e.Direction==='request');
   document.getElementById('recent-activity').innerHTML=rows.length===0
-    ?'<tr><td colspan="6" class="empty"><div class="icon">~</div>No activity yet. Tool calls will appear here in real time.</td></tr>'
+    ?`<tr><td colspan="6" class="empty"><div class="icon">~</div><div class="waiting">Waiting for your first tool call...</div><div style="margin-top:8px;font-size:11px">Run an AI agent with Quint active to see activity here</div></td></tr>`
     :rows.map(e=>`<tr>
-      <td style="color:var(--muted)">${timeStr(e.Timestamp)}</td>
-      <td style="color:var(--muted);font-size:11px">${esc(e.ServerName||'--')}</td>
-      <td style="color:var(--text-bright)">${esc(e.ToolName||e.Method)}</td>
+      <td style="color:var(--text-3);font-size:11px">${timeAgo(e.Timestamp)}</td>
+      <td style="color:var(--text-3);font-size:11px">${esc(e.ServerName||'--')}</td>
+      <td style="color:var(--text)">${esc(e.ToolName||e.Method)}</td>
       <td>${verdictTag(e.Verdict)}</td>
-      <td style="color:var(--muted)">${esc(e.AgentName||'--')}</td>
-      <td>${riskTag(e.RiskScore,e.RiskLevel)}</td>
+      <td>${riskDisplay(e.RiskScore,e.RiskLevel)}</td>
+      <td style="color:var(--text-3);font-size:11px">${esc(e.AgentName||'--')}</td>
     </tr>`).join('');
 }
 
@@ -346,14 +351,14 @@ async function loadAudit(){
   document.getElementById('audit-rows').innerHTML=rows.length===0
     ?'<tr><td colspan="8" class="empty">No entries match filters</td></tr>'
     :rows.map(e=>`<tr>
-      <td style="color:var(--muted);font-size:11px">${e.ID}</td>
-      <td style="color:var(--muted)">${timeStr(e.Timestamp)}</td>
-      <td><span class="tag tag-${e.Direction==='request'?'blue':'purple'}">${e.Direction}</span></td>
-      <td style="font-size:11px">${esc(e.Method)}</td>
-      <td style="color:var(--text-bright)">${esc(e.ToolName||'--')}</td>
+      <td style="color:var(--text-3);font-size:11px">${e.ID}</td>
+      <td style="color:var(--text-3);font-size:11px">${timeStr(e.Timestamp)}</td>
+      <td>${tag(e.Direction,e.Direction==='request'?'blue':'purple')}</td>
+      <td style="font-size:11px;color:var(--text-3)">${esc(e.Method)}</td>
+      <td style="color:var(--text)">${esc(e.ToolName||'--')}</td>
       <td>${verdictTag(e.Verdict)}</td>
-      <td>${riskTag(e.RiskScore,e.RiskLevel)}</td>
-      <td style="color:var(--muted)">${esc(e.AgentName||'--')}</td>
+      <td>${riskDisplay(e.RiskScore,e.RiskLevel)}</td>
+      <td style="color:var(--text-3);font-size:11px">${esc(e.AgentName||'--')}</td>
     </tr>`).join('');
   document.getElementById('audit-info').textContent=`${auditOffset+1}–${auditOffset+rows.length} of ${d.total}`;
   document.getElementById('audit-prev').disabled=auditOffset===0;
@@ -365,14 +370,14 @@ function auditPage(dir){auditOffset=Math.max(0,auditOffset+dir*LIMIT);loadAudit(
 async function loadAgents(){
   const d=await api('/api/agents');const agents=d.agents||[];
   document.getElementById('agent-rows').innerHTML=agents.length===0
-    ?'<tr><td colspan="6" class="empty"><div class="icon">~</div>No agents. Create one to assign scoped API keys.</td></tr>'
+    ?'<tr><td colspan="6" class="empty"><div class="icon">~</div>No agents yet. Create one to assign scoped API keys.</td></tr>'
     :agents.map(a=>`<tr>
-      <td style="color:var(--text-bright);font-weight:600">${esc(a.Name)}</td>
-      <td style="color:var(--muted)">${esc(a.Type)}</td>
-      <td><span class="tag tag-blue">${esc(a.Scopes)}</span></td>
+      <td style="color:var(--text);font-weight:500">${esc(a.Name)}</td>
+      <td style="color:var(--text-3)">${esc(a.Type)}</td>
+      <td>${tag(a.Scopes,'blue')}</td>
       <td>${statusTag(a.Status)}</td>
-      <td style="color:var(--muted);font-size:11px">${dateStr(a.CreatedAt)}</td>
-      <td>${a.Status==='active'?`<button class="btn btn-sm" onclick="agentAction('${esc(a.Name)}','suspend')">Suspend</button> <button class="btn btn-sm btn-danger" onclick="agentAction('${esc(a.Name)}','revoke')">Revoke</button>`:a.Status==='suspended'?`<button class="btn btn-sm" onclick="agentAction('${esc(a.Name)}','activate')">Activate</button> <button class="btn btn-sm btn-danger" onclick="agentAction('${esc(a.Name)}','revoke')">Revoke</button>`:'<span class="tag tag-muted">revoked</span>'}</td>
+      <td style="color:var(--text-3);font-size:11px">${dateStr(a.CreatedAt)}</td>
+      <td>${a.Status==='active'?`<button class="btn btn-sm" onclick="agentAction('${esc(a.Name)}','suspend')">Suspend</button> <button class="btn btn-sm btn-danger" onclick="agentAction('${esc(a.Name)}','revoke')">Revoke</button>`:a.Status==='suspended'?`<button class="btn btn-sm" onclick="agentAction('${esc(a.Name)}','activate')">Activate</button>`:'<span class="tag tag-muted">revoked</span>'}</td>
     </tr>`).join('');
 }
 async function agentAction(n,a){await api(`/api/agents/${n}/${a}`,{method:'POST'});loadAgents()}
@@ -389,43 +394,46 @@ async function createAgent(){
 async function loadApprovals(){
   const d=await api('/api/approvals');const p=d.pending||[];
   document.getElementById('approval-list').innerHTML=p.length===0
-    ?'<div class="empty"><div class="icon">~</div>No pending approvals. High-risk tool calls will appear here for review.</div>'
+    ?'<div class="empty"><div class="icon" style="font-size:40px">&#10003;</div>No pending approvals</div>'
     :p.map(r=>`<div class="approval-card">
       <div class="meta">
-        <div class="tool">${esc(r.ToolName)} ${riskTag(r.RiskScore,r.RiskLevel)}</div>
-        <div class="details"><span>Agent: ${esc(r.AgentName)}</span><span>Server: ${esc(r.ServerName)}</span><span>${timeStr(r.CreatedAt)}</span></div>
+        <div class="tool">${esc(r.ToolName)} ${riskDisplay(r.RiskScore,r.RiskLevel)}</div>
+        <div class="details"><span>Agent: ${esc(r.AgentName)}</span><span>Server: ${esc(r.ServerName)}</span><span>${timeAgo(r.CreatedAt)}</span></div>
         <div class="id">${esc(r.ID)}</div>
       </div>
       <div class="actions">
-        <button class="btn btn-primary btn-sm" onclick="approvalDecide('${esc(r.ID)}','approve')">Approve</button>
-        <button class="btn btn-danger btn-sm" onclick="approvalDecide('${esc(r.ID)}','deny')">Deny</button>
+        <button class="btn btn-sm" style="border-color:var(--green);color:var(--green)" onclick="approvalDecide('${esc(r.ID)}','approve')">Approve</button>
+        <button class="btn btn-sm btn-danger" onclick="approvalDecide('${esc(r.ID)}','deny')">Deny</button>
       </div>
     </div>`).join('');
 }
 async function approvalDecide(id,a){await api(`/api/approvals/${id}/${a}`,{method:'POST'});loadApprovals();loadOverview()}
 
-// Connected Services
+// Services
 async function loadServices(){
-  // Simple display of known connections
-  const creds = await api('/api/status');
   document.getElementById('services-body').innerHTML=`
-    <div class="service-row"><div class="service-icon">fs</div><div class="service-info"><div class="name">Filesystem</div><div class="scopes">stdio · read, write, edit, search</div></div>${tag('connected','green')}</div>
-    <div class="service-row"><div class="service-icon">mem</div><div class="service-info"><div class="name">Memory</div><div class="scopes">stdio · knowledge graph</div></div>${tag('connected','green')}</div>
-    <div class="service-row"><div class="service-icon">gh</div><div class="service-info"><div class="name">GitHub</div><div class="scopes">OAuth · repo, read:org</div></div>${tag('connected','green')}</div>
+    <div class="service-row"><div class="service-icon">gh</div><div class="service-info"><div class="name">GitHub</div><div class="scopes">OAuth &middot; repo, read:org</div></div>${tag('connected','green')}</div>
+    <div class="service-row"><div class="service-icon">fs</div><div class="service-info"><div class="name">Filesystem</div><div class="scopes">stdio &middot; read, write, search</div></div>${tag('connected','green')}</div>
   `;
 }
 
 // Policy
 async function loadPolicy(){
   const d=await api('/api/policy');
-  document.getElementById('policy-json').textContent=JSON.stringify(d,null,2);
+  const raw=JSON.stringify(d,null,2);
+  document.getElementById('policy-json').innerHTML=raw
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/("(?:[^"\\]|\\.)*")(\s*:)/g,'<span style="color:var(--blue)">$1</span>$2')
+    .replace(/:\s*("(?:[^"\\]|\\.)*")/g,': <span style="color:var(--green)">$1</span>')
+    .replace(/:\s*(\d+(?:\.\d+)?)/g,': <span style="color:var(--amber)">$1</span>')
+    .replace(/:\s*(true|false|null)/g,': <span style="color:var(--purple)">$1</span>');
 }
 
-// SSE Live Updates
+// SSE
 let evtSource;
 function connectSSE(){
   evtSource=new EventSource(API+'/api/events');
-  evtSource.onmessage=(e)=>{
+  evtSource.onmessage=e=>{
     const data=JSON.parse(e.data);
     if(data.type==='new_entries'){
       const active=document.querySelector('.sidebar a.active');
