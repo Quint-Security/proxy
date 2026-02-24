@@ -251,7 +251,7 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 
 	// Risk scoring
 	if g.riskEngine != nil {
-		subjectID := "anonymous"
+		subjectID := "gateway:" + backendName
 		if g.identity != nil {
 			subjectID = g.identity.SubjectID
 		}
