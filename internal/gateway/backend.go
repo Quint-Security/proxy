@@ -436,9 +436,3 @@ func (b *HTTPBackend) post(body any) (json.RawMessage, error) {
 	return json.RawMessage(respBody), nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

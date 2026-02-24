@@ -211,11 +211,17 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 
 	// --- Security pipeline ---
 
-	// Policy check
-	result := intercept.InspectRequest(
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"%s","arguments":%s}}`, toolName, params.Arguments),
-		backendName, g.policy,
-	)
+	// Policy check — build a proper JSON-RPC message for the interceptor
+	inspectMsg, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      toolName,
+			"arguments": json.RawMessage(params.Arguments),
+		},
+	})
+	result := intercept.InspectRequest(string(inspectMsg), backendName, g.policy)
 
 	// Audit request
 	if g.logger != nil {
@@ -322,7 +328,11 @@ func splitNamespacedTool(name string) (backend, tool string) {
 }
 
 func escapeJSON(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	return s
+	// Use json.Marshal to properly escape all special characters
+	b, err := json.Marshal(s)
+	if err != nil {
+		return s
+	}
+	// Strip the surrounding quotes that Marshal adds
+	return string(b[1 : len(b)-1])
 }
