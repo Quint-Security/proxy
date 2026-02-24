@@ -19,7 +19,7 @@ import (
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
 )
 
-//go:embed static/*
+//go:embed all:static
 var staticFiles embed.FS
 
 // Server is the dashboard web server.
