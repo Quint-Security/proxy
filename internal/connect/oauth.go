@@ -215,9 +215,12 @@ func waitForCallback(listener net.Listener) (code, state string, err error) {
 	select {
 	case code = <-codeCh:
 		state = <-stateCh
+		// Wait for the browser to receive the success page before closing
+		time.Sleep(500 * time.Millisecond)
 		srv.Close()
 		return code, state, nil
 	case err = <-errCh:
+		time.Sleep(500 * time.Millisecond)
 		srv.Close()
 		return "", "", err
 	case <-timeout:
