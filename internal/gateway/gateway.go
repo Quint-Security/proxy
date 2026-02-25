@@ -223,7 +223,30 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 	})
 	result := intercept.InspectRequest(string(inspectMsg), backendName, g.policy)
 
-	// Audit request
+	// Risk scoring (before audit so score is captured in the log)
+	var riskScore *int
+	var riskLevel *string
+	if g.riskEngine != nil {
+		subjectID := "gateway:" + backendName
+		if g.identity != nil {
+			subjectID = g.identity.SubjectID
+		}
+		score := g.riskEngine.ScoreToolCall(toolName, string(params.Arguments), subjectID)
+		score = g.riskEngine.EnhanceWithRemote(score, toolName, string(params.Arguments), subjectID, backendName)
+		riskScore = &score.Value
+		riskLevel = &score.Level
+
+		action := g.riskEngine.Evaluate(score.Value)
+		if action == "deny" {
+			qlog.Warn("risk-denied %s.%s (score=%d)", backendName, toolName, score.Value)
+			return g.jsonRpcError(id, -32600, fmt.Sprintf("Quint: %s.%s blocked by risk score (%d)", backendName, toolName, score.Value))
+		}
+		if action == "flag" {
+			qlog.Warn("high-risk %s.%s (score=%d, level=%s)", backendName, toolName, score.Value, score.Level)
+		}
+	}
+
+	// Audit request (includes risk score)
 	if g.logger != nil {
 		agentID, agentName := "", ""
 		if g.identity != nil {
@@ -237,6 +260,8 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 			ToolName:      toolName,
 			ArgumentsJSON: string(params.Arguments),
 			Verdict:       string(result.Verdict),
+			RiskScore:     riskScore,
+			RiskLevel:     riskLevel,
 			AgentID:       agentID,
 			AgentName:     agentName,
 		})
@@ -252,24 +277,6 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 		if scope, ok := auth.EnforceScope(g.identity, toolName); !ok {
 			qlog.Info("scope-denied %s.%s (requires %s)", backendName, toolName, scope)
 			return g.jsonRpcError(id, -32600, fmt.Sprintf("Quint: insufficient scope for %s.%s (requires %s)", backendName, toolName, scope))
-		}
-	}
-
-	// Risk scoring
-	if g.riskEngine != nil {
-		subjectID := "gateway:" + backendName
-		if g.identity != nil {
-			subjectID = g.identity.SubjectID
-		}
-		score := g.riskEngine.ScoreToolCall(toolName, string(params.Arguments), subjectID)
-		score = g.riskEngine.EnhanceWithRemote(score, toolName, string(params.Arguments), subjectID, backendName)
-		action := g.riskEngine.Evaluate(score.Value)
-		if action == "deny" {
-			qlog.Warn("risk-denied %s.%s (score=%d)", backendName, toolName, score.Value)
-			return g.jsonRpcError(id, -32600, fmt.Sprintf("Quint: %s.%s blocked by risk score (%d)", backendName, toolName, score.Value))
-		}
-		if action == "flag" {
-			qlog.Warn("high-risk %s.%s (score=%d, level=%s)", backendName, toolName, score.Value, score.Level)
 		}
 	}
 
