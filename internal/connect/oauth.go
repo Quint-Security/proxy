@@ -89,8 +89,75 @@ func exchangeViaAPI(provider, code, codeVerifier, redirectURI string) (*TokenRes
 	return &result, nil
 }
 
+// fetchProviderConfig fetches public OAuth config from the Quint API.
+func fetchProviderConfig(provider string) (*Provider, error) {
+	apiURL := os.Getenv("QUINT_API_URL")
+	if apiURL == "" {
+		apiURL = DefaultAPIURL
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("%s/v1/oauth/config?provider=%s", apiURL, url.QueryEscape(provider)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to reach API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("API returned %d: %s", resp.StatusCode, body)
+	}
+
+	var p Provider
+	if err := json.Unmarshal(body, &p); err != nil {
+		return nil, fmt.Errorf("failed to parse config response: %w", err)
+	}
+	return &p, nil
+}
+
 // RunOAuthFlow runs a full OAuth 2.0 PKCE authorization code flow.
 func RunOAuthFlow(opts FlowOpts) (*TokenResult, error) {
+	// Fetch provider config from the API to fill in any missing fields
+	if opts.Provider != "" {
+		if fetched, err := fetchProviderConfig(opts.Provider); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not fetch provider config from API: %v\n", err)
+		} else {
+			// Merge: API values fill in empty fields only (don't override user flags)
+			if opts.ClientID == "" {
+				opts.ClientID = fetched.ClientID
+			}
+			if opts.ClientSecret == "" {
+				opts.ClientSecret = fetched.ClientSecret
+			}
+			if opts.AuthURL == "" {
+				opts.AuthURL = fetched.AuthURL
+			}
+			if opts.TokenURL == "" {
+				opts.TokenURL = fetched.TokenURL
+			}
+			if len(opts.Scopes) == 0 && len(fetched.DefaultScopes) > 0 {
+				opts.Scopes = fetched.DefaultScopes
+			}
+			if opts.CallbackPort == 0 && fetched.CallbackPort > 0 {
+				opts.CallbackPort = fetched.CallbackPort
+			}
+			if !opts.BasicAuth && fetched.BasicAuth {
+				opts.BasicAuth = fetched.BasicAuth
+			}
+			if !opts.TLSCallback && fetched.TLSCallback {
+				opts.TLSCallback = fetched.TLSCallback
+			}
+			if opts.ExtraParams == nil && len(fetched.ExtraParams) > 0 {
+				opts.ExtraParams = fetched.ExtraParams
+			}
+		}
+	}
+
+	// Pre-flight: clientID is required to build the authorization URL
+	if opts.ClientID == "" {
+		return nil, fmt.Errorf("no client ID available for provider %s. Ensure api.quintsecurity.com is reachable, or provide --client-id manually", opts.Provider)
+	}
+
 	// Generate PKCE values
 	verifierBytes := make([]byte, 64)
 	rand.Read(verifierBytes)

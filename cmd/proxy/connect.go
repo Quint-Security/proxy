@@ -170,11 +170,18 @@ func runConnectAdd(args []string) {
 		}
 	}
 
-	if clientID != "" {
-		// OAuth flow
+	// If no client secret and no known provider for server-side exchange, warn
+	if clientSecret == "" && provider != nil {
+		fmt.Fprintf(os.Stderr, "No client secret available. Token exchange will be handled server-side via api.quintsecurity.com.\n")
+	}
+
+	if clientID != "" || provider != nil {
+		// OAuth flow — for known providers, RunOAuthFlow will fetch config from the API
 		if authURL == "" || tokenURL == "" {
-			fmt.Fprintf(os.Stderr, "Unknown provider %q. Specify --auth-url and --token-url.\n", service)
-			os.Exit(1)
+			if provider == nil {
+				fmt.Fprintf(os.Stderr, "Unknown provider %q. Specify --auth-url and --token-url.\n", service)
+				os.Exit(1)
+			}
 		}
 
 		var scopeList []string
