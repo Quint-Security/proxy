@@ -66,6 +66,17 @@ type RiskConfig struct {
 	Keywords []RiskKeywordConfig `json:"keywords,omitempty"`
 	// DisableBuiltins disables the built-in risk patterns and keywords when true.
 	DisableBuiltins bool `json:"disable_builtins,omitempty"`
+	// RemoteAPI configures an optional remote risk scoring API (paid tier).
+	RemoteAPI *RemoteAPIConfig `json:"risk_api,omitempty"`
+}
+
+// RemoteAPIConfig configures the remote risk scoring API.
+type RemoteAPIConfig struct {
+	URL        string `json:"url"`
+	APIKey     string `json:"api_key"`
+	CustomerID string `json:"customer_id"`
+	Enabled    bool   `json:"enabled"`
+	TimeoutMs  int    `json:"timeout_ms,omitempty"`
 }
 
 // PolicyConfig is the top-level policy file structure.

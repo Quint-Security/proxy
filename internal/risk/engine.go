@@ -40,6 +40,7 @@ type Engine struct {
 	customPatterns  []RiskPattern
 	customKeywords  []ArgKeyword
 	disableBuiltins bool
+	remote          *RemoteScorer
 }
 
 // EngineOpts configures the risk engine.
@@ -49,6 +50,7 @@ type EngineOpts struct {
 	CustomKeywords  []ArgKeyword
 	DisableBuiltins bool
 	BehaviorDB      *BehaviorDB
+	Remote          *RemoteScorer
 }
 
 // NewEngine creates a new risk scoring engine.
@@ -62,11 +64,13 @@ func NewEngine(opts *EngineOpts) *Engine {
 	var cp []RiskPattern
 	var ck []ArgKeyword
 	var disableBuiltins bool
+	var remote *RemoteScorer
 	if opts != nil {
 		db = opts.BehaviorDB
 		cp = opts.CustomPatterns
 		ck = opts.CustomKeywords
 		disableBuiltins = opts.DisableBuiltins
+		remote = opts.Remote
 	}
 
 	return &Engine{
@@ -75,6 +79,7 @@ func NewEngine(opts *EngineOpts) *Engine {
 		customPatterns:  cp,
 		customKeywords:  ck,
 		disableBuiltins: disableBuiltins,
+		remote:          remote,
 	}
 }
 
@@ -118,6 +123,16 @@ func NewEngineFromPolicy(riskCfg *intercept.RiskConfig, behaviorDB *BehaviorDB) 
 		}
 
 		opts.DisableBuiltins = riskCfg.DisableBuiltins
+
+		if riskCfg.RemoteAPI != nil {
+			opts.Remote = NewRemoteScorer(&RemoteConfig{
+				URL:        riskCfg.RemoteAPI.URL,
+				APIKey:     riskCfg.RemoteAPI.APIKey,
+				CustomerID: riskCfg.RemoteAPI.CustomerID,
+				Enabled:    riskCfg.RemoteAPI.Enabled,
+				TimeoutMs:  riskCfg.RemoteAPI.TimeoutMs,
+			})
+		}
 	}
 
 	return NewEngine(opts)
@@ -206,6 +221,15 @@ func (e *Engine) ScoreToolCall(toolName, argsJSON, subjectID string) Score {
 		Level:         level,
 		Reasons:       reasons,
 	}
+}
+
+// EnhanceWithRemote sends the local score to the remote API for enrichment.
+// Returns the local score unchanged if no remote scorer is configured or on failure.
+func (e *Engine) EnhanceWithRemote(localScore Score, toolName, argsJSON, subjectID, serverName string) Score {
+	if e.remote == nil {
+		return localScore
+	}
+	return e.remote.EnhanceScore(localScore, toolName, argsJSON, subjectID, serverName)
 }
 
 // Evaluate determines the action based on a risk score.

@@ -76,12 +76,12 @@ func runStart(args []string) {
 	json.Unmarshal(policyBytes, &policyMap)
 	logger := audit.NewLogger(auditDB, kp.PrivateKey, kp.PublicKey, policyMap)
 
-	// Set up risk engine
+	// Set up risk engine (loads thresholds, custom patterns, and remote scorer from policy)
 	behaviorDB, _ := risk.OpenBehaviorDB(dataDir)
 	if behaviorDB != nil {
 		defer behaviorDB.Close()
 	}
-	riskEngine := risk.NewEngine(&risk.EngineOpts{BehaviorDB: behaviorDB})
+	riskEngine := risk.NewEngineFromPolicy(policy.Risk, behaviorDB)
 
 	// Resolve agent identity
 	agentName := agentFlag

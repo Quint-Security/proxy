@@ -262,6 +262,7 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 			subjectID = g.identity.SubjectID
 		}
 		score := g.riskEngine.ScoreToolCall(toolName, string(params.Arguments), subjectID)
+		score = g.riskEngine.EnhanceWithRemote(score, toolName, string(params.Arguments), subjectID, backendName)
 		action := g.riskEngine.Evaluate(score.Value)
 		if action == "deny" {
 			qlog.Warn("risk-denied %s.%s (score=%d)", backendName, toolName, score.Value)
