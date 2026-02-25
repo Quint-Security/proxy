@@ -84,12 +84,12 @@ func (s *Server) Start(port int) error {
 	// Start polling for new audit entries
 	go s.pollAuditUpdates()
 
-	// Static files
+	// Static files — SPA-aware handler for Next.js static export
 	sub, err := fs.Sub(staticFiles, "static")
 	if err != nil {
 		return fmt.Errorf("static files: %w", err)
 	}
-	mux.Handle("/", http.FileServer(http.FS(sub)))
+	mux.Handle("/", &spaHandler{fs: http.FS(sub)})
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
@@ -334,7 +334,6 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	ch := make(chan string, 16)
 	s.sseClientsMu.Lock()
@@ -344,6 +343,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		s.sseClientsMu.Lock()
 		delete(s.sseClients, ch)
+		close(ch)
 		s.sseClientsMu.Unlock()
 	}()
 
@@ -412,10 +412,9 @@ func mustJSON(v any) string {
 	return string(b)
 }
 
-// corsMiddleware adds CORS headers so the external Next.js dashboard can call the API.
+// corsMiddleware adds CORS headers for local dev when dashboard runs separately.
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Only add CORS for API routes
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -428,4 +427,41 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// spaHandler serves static files and falls back to .html extension or index.html
+// for Next.js static export routing (e.g., /audit → audit.html).
+type spaHandler struct {
+	fs http.FileSystem
+}
+
+func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+
+	// Try exact path first (for static assets like /_next/*, .css, .js)
+	if f, err := h.fs.Open(path); err == nil {
+		f.Close()
+		http.FileServer(h.fs).ServeHTTP(w, r)
+		return
+	}
+
+	// Try path + .html (e.g., /audit → /audit.html)
+	if f, err := h.fs.Open(path + ".html"); err == nil {
+		f.Close()
+		r.URL.Path = path + ".html"
+		http.FileServer(h.fs).ServeHTTP(w, r)
+		return
+	}
+
+	// Try path/index.html (e.g., /audit/ → /audit/index.html)
+	if f, err := h.fs.Open(path + "/index.html"); err == nil {
+		f.Close()
+		r.URL.Path = path + "/index.html"
+		http.FileServer(h.fs).ServeHTTP(w, r)
+		return
+	}
+
+	// Fallback to index.html for client-side routing
+	r.URL.Path = "/index.html"
+	http.FileServer(h.fs).ServeHTTP(w, r)
 }

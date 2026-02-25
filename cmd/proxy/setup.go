@@ -111,10 +111,15 @@ func runSetup(args []string) {
 
 		if added > 0 {
 			serversPath := filepath.Join(dataDir, "servers.json")
-			data, _ := json.MarshalIndent(gatewayCfg, "", "  ")
-			os.WriteFile(serversPath, append(data, '\n'), 0o644)
-			fmt.Printf("\n  Updated servers.json with %d new server(s).\n", added)
-			fmt.Println("  Restart Claude Code for changes to take effect.")
+			data, err := json.MarshalIndent(gatewayCfg, "", "  ")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  Failed to serialize servers config: %v\n", err)
+			} else if err := os.WriteFile(serversPath, append(data, '\n'), 0o644); err != nil {
+				fmt.Fprintf(os.Stderr, "  Failed to write servers.json: %v\n", err)
+			} else {
+				fmt.Printf("\n  Updated servers.json with %d new server(s).\n", added)
+				fmt.Println("  Restart Claude Code for changes to take effect.")
+			}
 		}
 	}
 	fmt.Println()
