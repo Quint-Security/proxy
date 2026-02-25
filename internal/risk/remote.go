@@ -97,7 +97,7 @@ func (r *RemoteScorer) EnhanceScore(localScore Score, toolName, argsJSON, subjec
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if r.config.APIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+r.config.APIKey)
+		httpReq.Header.Set("X-API-Key", r.config.APIKey)
 	}
 
 	resp, err := r.client.Do(httpReq)
