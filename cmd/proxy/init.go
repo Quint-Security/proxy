@@ -166,16 +166,54 @@ func runInit(args []string) int {
 		role = &r
 	}
 
+	// Default deny rules block dangerous tool patterns out of the box.
+	// These apply to detected servers when no --role is specified.
+	defaultDenyRules := []intercept.ToolRule{
+		// Destructive operations
+		{Tool: "*delete*", Action: intercept.ActionDeny},
+		{Tool: "*Delete*", Action: intercept.ActionDeny},
+		{Tool: "*remove*", Action: intercept.ActionDeny},
+		{Tool: "*Remove*", Action: intercept.ActionDeny},
+		{Tool: "*destroy*", Action: intercept.ActionDeny},
+		{Tool: "*Destroy*", Action: intercept.ActionDeny},
+		// Shell execution
+		{Tool: "*execute*", Action: intercept.ActionDeny},
+		{Tool: "*Execute*", Action: intercept.ActionDeny},
+		{Tool: "*run_command*", Action: intercept.ActionDeny},
+		{Tool: "*RunCommand*", Action: intercept.ActionDeny},
+		{Tool: "*shell*", Action: intercept.ActionDeny},
+		{Tool: "*Shell*", Action: intercept.ActionDeny},
+		{Tool: "*bash*", Action: intercept.ActionDeny},
+		{Tool: "*Bash*", Action: intercept.ActionDeny},
+		{Tool: "*terminal*", Action: intercept.ActionDeny},
+		{Tool: "*Terminal*", Action: intercept.ActionDeny},
+		// Sensitive path writes
+		{Tool: "*write*secret*", Action: intercept.ActionDeny},
+		{Tool: "*write*Secret*", Action: intercept.ActionDeny},
+		{Tool: "*Write*secret*", Action: intercept.ActionDeny},
+		{Tool: "*Write*Secret*", Action: intercept.ActionDeny},
+		{Tool: "*write*env*", Action: intercept.ActionDeny},
+		{Tool: "*Write*env*", Action: intercept.ActionDeny},
+		{Tool: "*Write*Env*", Action: intercept.ActionDeny},
+		{Tool: "*write*credential*", Action: intercept.ActionDeny},
+		{Tool: "*write*Credential*", Action: intercept.ActionDeny},
+		{Tool: "*Write*credential*", Action: intercept.ActionDeny},
+		{Tool: "*Write*Credential*", Action: intercept.ActionDeny},
+	}
+
 	serverPolicies := make([]intercept.ServerPolicy, 0, len(servers)+1)
 	for _, s := range servers {
 		sp := intercept.ServerPolicy{Server: s.Name, DefaultAction: intercept.ActionAllow, Tools: []intercept.ToolRule{}}
 		if role != nil {
 			sp.DefaultAction = role.DefaultAction
 			sp.Tools = append(sp.Tools, role.Tools...)
+		} else {
+			sp.Tools = append(sp.Tools, defaultDenyRules...)
 		}
 		serverPolicies = append(serverPolicies, sp)
 	}
-	serverPolicies = append(serverPolicies, intercept.ServerPolicy{Server: "*", DefaultAction: intercept.ActionAllow, Tools: []intercept.ToolRule{}})
+	// Unknown servers are denied by default (fail-closed)
+	serverPolicies = append(serverPolicies, intercept.ServerPolicy{Server: "*", DefaultAction: intercept.ActionDeny, Tools: []intercept.ToolRule{}})
 
 	policy := intercept.PolicyConfig{
 		Version: 1, DataDir: "~/.quint", LogLevel: "info", Servers: serverPolicies,
@@ -190,6 +228,11 @@ func runInit(args []string) int {
 			roleLabel = fmt.Sprintf(", role: %s", role.Name)
 		}
 		fmt.Printf("  Policy: %s (created%s)\n", policyPath, roleLabel)
+		if role == nil {
+			fmt.Println("           Detected servers: allow with deny rules for destructive/shell/sensitive ops")
+			fmt.Println("           Unknown servers:  denied (fail-closed)")
+			fmt.Println("           Customize: edit policy.json or re-run with --role <preset>")
+		}
 	} else {
 		fmt.Printf("  Policy: %s (exists, not overwritten)\n", policyPath)
 	}
