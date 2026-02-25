@@ -157,6 +157,11 @@ var providerMCPServers = map[string]gateway.ServerConfig{
 		Args:    []string{"-y", "@modelcontextprotocol/server-github"},
 		Env:     map[string]string{"GITHUB_PERSONAL_ACCESS_TOKEN": "__CREDENTIAL:github__"},
 	},
+	"notion": {
+		Command: "npx",
+		Args:    []string{"-y", "@notionhq/notion-mcp-server"},
+		Env:     map[string]string{"NOTION_TOKEN": "__CREDENTIAL:notion__"},
+	},
 	// TODO: Slack MCP server requires SLACK_TEAM_ID in addition to the OAuth token.
 	// The connect flow needs to prompt for team ID after OAuth before we can auto-add this.
 	// "slack": { ... }
