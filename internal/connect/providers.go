@@ -4,53 +4,50 @@ import "strings"
 
 // Provider defines a known OAuth provider.
 type Provider struct {
-	Name         string            `json:"name"`
-	ClientID     string            `json:"client_id,omitempty"`
-	ClientSecret string            `json:"client_secret,omitempty"` // Temporary — will move to server-side exchange (#9)
-	AuthURL      string            `json:"auth_url"`
-	TokenURL     string            `json:"token_url"`
-	CallbackPort int               `json:"callback_port,omitempty"`
-	DefaultScopes []string         `json:"default_scopes"`
-	Docs         string            `json:"docs"`
-	BasicAuth    bool              `json:"basic_auth,omitempty"`
-	TLSCallback  bool             `json:"tls_callback,omitempty"` // Require HTTPS for callback (Slack)
-	ExtraParams  map[string]string `json:"extra_params,omitempty"`
+	Name          string            `json:"name"`
+	ClientID      string            `json:"client_id,omitempty"`
+	ClientSecret  string            `json:"client_secret,omitempty"`
+	AuthURL       string            `json:"auth_url"`
+	TokenURL      string            `json:"token_url"`
+	CallbackPort  int               `json:"callback_port,omitempty"`
+	DefaultScopes []string          `json:"default_scopes"`
+	Docs          string            `json:"docs"`
+	BasicAuth     bool              `json:"basic_auth,omitempty"`
+	TLSCallback   bool              `json:"tls_callback,omitempty"`
+	ExtraParams   map[string]string `json:"extra_params,omitempty"`
 }
 
 // Providers is the map of known OAuth providers.
+// Client IDs and secrets are fetched at runtime from the Quint API.
+// Only GitHub's public client ID is kept here as a fallback.
 var Providers = map[string]Provider{
 	"github": {
-		Name:         "GitHub",
-		ClientID:     "Ov23liVPN35pZFQ7L7Rl",
-		ClientSecret: "681de8ad98acad13193e1fe93f072f67645aa3c9", // #nosec — desktop OAuth app, will move to server-side exchange (#9)
-		AuthURL:      "https://github.com/login/oauth/authorize",
-		TokenURL:     "https://github.com/login/oauth/access_token",
-		CallbackPort: 7890,
+		Name:          "GitHub",
+		ClientID:      "Ov23liVPN35pZFQ7L7Rl",
+		AuthURL:       "https://github.com/login/oauth/authorize",
+		TokenURL:      "https://github.com/login/oauth/access_token",
+		CallbackPort:  7890,
 		DefaultScopes: []string{"repo", "read:org"},
-		Docs:         "https://github.com/settings/developers",
+		Docs:          "https://github.com/settings/developers",
 	},
 	"notion": {
-		Name:         "Notion",
-		ClientID:     "310d872b-594c-8147-8b65-003725e652e2",
-		ClientSecret: "secret_7rV4uWbq2Cz4ANSkIqvHNp2UEhEb1rMdUmM3J8C7Dxq", // #nosec — desktop OAuth app, will move to server-side exchange (#9)
-		AuthURL:      "https://api.notion.com/v1/oauth/authorize",
-		TokenURL:     "https://api.notion.com/v1/oauth/token",
-		CallbackPort: 7890,
+		Name:          "Notion",
+		AuthURL:       "https://api.notion.com/v1/oauth/authorize",
+		TokenURL:      "https://api.notion.com/v1/oauth/token",
+		CallbackPort:  7890,
 		DefaultScopes: []string{},
-		Docs:         "https://www.notion.so/my-integrations",
-		BasicAuth:    true,
-		ExtraParams:  map[string]string{"owner": "user"},
+		Docs:          "https://www.notion.so/my-integrations",
+		BasicAuth:     true,
+		ExtraParams:   map[string]string{"owner": "user"},
 	},
 	"slack": {
-		Name:         "Slack",
-		ClientID:     "10554967976323.10561366417170",
-		ClientSecret: "b0a7a0a0a360e50355439e2ee69f4c51",
-		AuthURL:      "https://slack.com/oauth/v2/authorize",
-		TokenURL:     "https://slack.com/api/oauth.v2.access",
-		CallbackPort: 7890,
+		Name:          "Slack",
+		AuthURL:       "https://slack.com/oauth/v2/authorize",
+		TokenURL:      "https://slack.com/api/oauth.v2.access",
+		CallbackPort:  7890,
 		DefaultScopes: []string{"app_mentions:read", "bookmarks:read", "calls:read", "calls:write", "users:read", "files:read"},
-		Docs:         "https://api.slack.com/apps",
-		TLSCallback:  true,
+		Docs:          "https://api.slack.com/apps",
+		TLSCallback:   true,
 	},
 	"sentry": {
 		Name:          "Sentry",

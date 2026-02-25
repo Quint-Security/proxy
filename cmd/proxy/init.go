@@ -346,15 +346,30 @@ func runRevert(dryRun bool) {
 // mcpClient describes a known MCP client and its config file locations.
 type mcpClient struct {
 	Name        string
-	ConfigPaths []string // relative to home directory
+	ConfigPaths []string // relative to home directory (or glob patterns if IsGlob is true)
+	ServerKey   string   // JSON key containing servers map; defaults to "mcpServers" if empty
+	IsGlob      bool     // if true, ConfigPaths may contain glob wildcards to expand
 }
 
 // knownMCPClients lists all supported MCP clients and their config file paths.
 func knownMCPClients() []mcpClient {
 	return []mcpClient{
 		{Name: "Claude Code", ConfigPaths: []string{".claude.json"}},
-		{Name: "Cursor", ConfigPaths: []string{".cursor/mcp.json", "Library/Application Support/Cursor/User/globalStorage/cursor.mcp/mcp.json"}},
+		{Name: "Claude Desktop", ConfigPaths: []string{
+			"Library/Application Support/Claude/claude_desktop_config.json", // macOS
+			".config/Claude/claude_desktop_config.json",                     // Linux
+		}},
+		{Name: "VS Code", ConfigPaths: []string{".vscode/mcp.json"}, ServerKey: "servers"},
+		{Name: "Cursor", ConfigPaths: []string{
+			".cursor/mcp.json",
+			"Library/Application Support/Cursor/User/globalStorage/cursor.mcp/mcp.json",
+		}},
 		{Name: "Windsurf", ConfigPaths: []string{".windsurf/mcp.json", ".codeium/windsurf/mcp_config.json"}},
+		{Name: "Zed", ConfigPaths: []string{".config/zed/settings.json"}, ServerKey: "context_servers"},
+		{Name: "JetBrains", ConfigPaths: []string{
+			"Library/Application Support/JetBrains/*/mcp.json", // macOS
+			".config/JetBrains/*/mcp.json",                     // Linux
+		}, IsGlob: true},
 		{Name: "Cline", ConfigPaths: []string{
 			"Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
 			".config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
@@ -368,7 +383,21 @@ func detectMcpServers() []detectedServer {
 	seen := map[string]bool{}
 
 	for _, client := range knownMCPClients() {
-		for _, relPath := range client.ConfigPaths {
+		// Resolve config paths — expand globs if needed
+		var resolvedPaths []string
+		if client.IsGlob {
+			for _, pattern := range client.ConfigPaths {
+				matches, _ := filepath.Glob(filepath.Join(home, pattern))
+				for _, m := range matches {
+					rel, _ := filepath.Rel(home, m)
+					resolvedPaths = append(resolvedPaths, rel)
+				}
+			}
+		} else {
+			resolvedPaths = client.ConfigPaths
+		}
+
+		for _, relPath := range resolvedPaths {
 			configPath := filepath.Join(home, relPath)
 			data, err := os.ReadFile(configPath)
 			if err != nil {
@@ -377,13 +406,20 @@ func detectMcpServers() []detectedServer {
 
 			var config map[string]any
 			if err := json.Unmarshal(data, &config); err != nil {
+				fmt.Fprintf(os.Stderr, "  Warning: %s config at ~/%s is malformed, skipping\n", client.Name, relPath)
 				continue
+			}
+
+			// Determine which JSON key holds the servers map
+			serverKey := client.ServerKey
+			if serverKey == "" {
+				serverKey = "mcpServers"
 			}
 
 			fmt.Printf("  Detected %s (%s)\n", client.Name, relPath)
 
-			// Parse mcpServers at top level
-			if mcpServers, ok := config["mcpServers"].(map[string]any); ok {
+			// Parse servers at the configured key
+			if mcpServers, ok := config[serverKey].(map[string]any); ok {
 				for name, srv := range mcpServers {
 					if seen[name] {
 						continue
@@ -422,7 +458,11 @@ func detectMcpServers() []detectedServer {
 				}
 			}
 
-			break // found config for this client, don't check alternate paths
+			// For glob clients (e.g. JetBrains), check all expanded paths.
+			// For others, the first matching config is sufficient.
+			if !client.IsGlob {
+				break
+			}
 		}
 	}
 
@@ -432,7 +472,20 @@ func detectMcpServers() []detectedServer {
 func parseMcpServer(m map[string]any) claudeMcpServer {
 	cs := claudeMcpServer{}
 	if v, ok := m["command"].(string); ok {
+		// Standard format: {"command": "npx", "args": [...]}
 		cs.Command = v
+	} else if cmdObj, ok := m["command"].(map[string]any); ok {
+		// Zed format: {"command": {"path": "npx", "args": [...]}}
+		if v, ok := cmdObj["path"].(string); ok {
+			cs.Command = v
+		}
+		if args, ok := cmdObj["args"].([]any); ok {
+			for _, a := range args {
+				if s, ok := a.(string); ok {
+					cs.Args = append(cs.Args, s)
+				}
+			}
+		}
 	}
 	if v, ok := m["url"].(string); ok {
 		cs.URL = v
@@ -440,10 +493,13 @@ func parseMcpServer(m map[string]any) claudeMcpServer {
 	if v, ok := m["type"].(string); ok {
 		cs.Type = v
 	}
-	if args, ok := m["args"].([]any); ok {
-		for _, a := range args {
-			if s, ok := a.(string); ok {
-				cs.Args = append(cs.Args, s)
+	// Top-level args (standard format) — only if not already set by nested command
+	if len(cs.Args) == 0 {
+		if args, ok := m["args"].([]any); ok {
+			for _, a := range args {
+				if s, ok := a.(string); ok {
+					cs.Args = append(cs.Args, s)
+				}
 			}
 		}
 	}
