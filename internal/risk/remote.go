@@ -62,10 +62,11 @@ type eventRequest struct {
 
 // eventResponse is the response from POST /events.
 type eventResponse struct {
-	Score      int      `json:"score"`
-	RiskLevel  string   `json:"risk_level"`
-	Violations []string `json:"violations"`
-	Reasoning  string   `json:"reasoning"`
+	Score         int      `json:"score"`
+	RiskLevel     string   `json:"risk_level"`
+	Violations    []string `json:"violations"`
+	Reasoning     string   `json:"reasoning"`
+	ScoringSource string   `json:"scoring_source"`
 }
 
 // EnhanceScore calls the remote API and returns an enhanced score.
@@ -119,6 +120,9 @@ func (r *RemoteScorer) EnhanceScore(localScore Score, toolName, argsJSON, subjec
 		qlog.Warn("remote risk: failed to parse response, falling back to local score: %v", err)
 		return localScore
 	}
+
+	qlog.Info("remote risk: action=%s local=%d remote=%d level=%s source=%s reasoning=%q violations=%v",
+		req.Action, localScore.Value, result.Score, result.RiskLevel, result.ScoringSource, result.Reasoning, result.Violations)
 
 	// Only use remote score if it's higher than local (never lower the security bar)
 	finalScore := localScore.Value
