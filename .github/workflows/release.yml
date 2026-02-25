@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+            name: darwin-arm64
+          - goos: darwin
+            goarch: amd64
+            name: darwin-x64
+          - goos: linux
+            goarch: amd64
+            name: linux-x64
+          - goos: linux
+            goarch: arm64
+            name: linux-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          go build -ldflags "-X main.version=${TAG}" -o quint ./cmd/proxy/
+
+      - name: Package
+        run: |
+          tar czf quint-${{ matrix.name }}.tar.gz quint
+          sha256sum quint-${{ matrix.name }}.tar.gz > quint-${{ matrix.name }}.tar.gz.sha256
+
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            quint-${{ matrix.name }}.tar.gz
+            quint-${{ matrix.name }}.tar.gz.sha256
