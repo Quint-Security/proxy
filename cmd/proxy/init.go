@@ -70,7 +70,7 @@ type detectedServer struct {
 	AlreadyProxied bool
 }
 
-func runInit(args []string) {
+func runInit(args []string) int {
 	var roleName string
 	var apply, revert, dryRun, listRoles bool
 
@@ -97,12 +97,12 @@ func runInit(args []string) {
 		for id, preset := range rolePresets {
 			fmt.Printf("  %s\n    %s\n    Default: %s, %d tool rules\n\n", id, preset.Description, preset.DefaultAction, len(preset.Tools))
 		}
-		return
+		return 0
 	}
 
 	if revert {
 		runRevert(dryRun)
-		return
+		return 0
 	}
 
 	fmt.Println("Quint Setup")
@@ -110,21 +110,31 @@ func runInit(args []string) {
 	// Detect MCP servers
 	servers := detectMcpServers()
 	if len(servers) == 0 {
-		fmt.Println("  No MCP servers found in ~/.claude.json")
-		fmt.Println("  Add MCP servers to Claude Code first, then run quint-proxy init again.")
-		return
-	}
-
-	fmt.Printf("  Found %d MCP server(s):\n\n", len(servers))
-	for _, s := range servers {
-		status := ""
-		if s.AlreadyProxied {
-			status = " (already proxied)"
+		fmt.Println("  No MCP servers detected.")
+		fmt.Println("  Quint works by wrapping your existing MCP servers.")
+		fmt.Println()
+		fmt.Println("  Checked:")
+		for _, client := range knownMCPClients() {
+			for _, relPath := range client.ConfigPaths {
+				fmt.Printf("    ~/%s  (%s)\n", relPath, client.Name)
+			}
 		}
-		if s.Config.Command != "" {
-			fmt.Printf("    %s [stdio: %s] (%s)%s\n", s.Name, s.Config.Command, s.Source, status)
-		} else if s.Config.URL != "" {
-			fmt.Printf("    %s [HTTP: %s] (%s)%s\n", s.Name, s.Config.URL, s.Source, status)
+		fmt.Println()
+		fmt.Println("  To get started:")
+		fmt.Println("    1. Add MCP servers to Claude Code, Cursor, or Windsurf")
+		fmt.Println("    2. Run `quint setup` again")
+	} else {
+		fmt.Printf("  Found %d MCP server(s):\n\n", len(servers))
+		for _, s := range servers {
+			status := ""
+			if s.AlreadyProxied {
+				status = " (already proxied)"
+			}
+			if s.Config.Command != "" {
+				fmt.Printf("    %s [stdio: %s] (%s)%s\n", s.Name, s.Config.Command, s.Source, status)
+			} else if s.Config.URL != "" {
+				fmt.Printf("    %s [HTTP: %s] (%s)%s\n", s.Name, s.Config.URL, s.Source, status)
+			}
 		}
 	}
 
@@ -140,6 +150,10 @@ func runInit(args []string) {
 	}
 	fingerprint := kp.PublicKey[27:43] // rough fingerprint from PEM body
 	fmt.Printf("  Keys:   %s (ready)\n", fingerprint)
+
+	if len(servers) == 0 {
+		return 0
+	}
 
 	// Generate policy
 	var role *rolePreset
@@ -188,11 +202,11 @@ func runInit(args []string) {
 		if existingCfg != nil && len(existingCfg.Servers) > 0 {
 			fmt.Printf("\n  All servers already proxied through Quint (%d servers configured).\n", len(existingCfg.Servers))
 			fmt.Println("\n  Setup complete.")
-			return
+			return len(servers)
 		}
 		fmt.Println("\n  No MCP servers found to proxy.")
 		fmt.Println("\n  Setup complete.")
-		return
+		return len(servers)
 	}
 
 	self, _ := os.Executable()
@@ -233,6 +247,7 @@ func runInit(args []string) {
 	}
 
 	fmt.Println("\n  Setup complete.")
+	return len(servers)
 }
 
 func runRevert(dryRun bool) {

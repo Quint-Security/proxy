@@ -23,7 +23,7 @@ func runSetup(args []string) {
 	// Step 1: Init
 	fmt.Println("[1/3] Detecting MCP servers and generating keys...")
 	fmt.Println()
-	runInit(append(args, "--apply"))
+	serverCount := runInit(append(args, "--apply"))
 	fmt.Println()
 
 	// Step 2: Connect providers
@@ -125,16 +125,27 @@ func runSetup(args []string) {
 	fmt.Println()
 
 	// Step 3: Done
-	fmt.Println("[3/3] Setup complete!")
-	fmt.Println()
-	fmt.Println("  Your AI agents are now secured through Quint.")
-	fmt.Println("  Every tool call is intercepted, risk-scored, and signed.")
-	fmt.Println()
-	fmt.Println("  Next steps:")
-	fmt.Println("    quint dashboard    Open the web dashboard")
-	fmt.Println("    quint status       Quick health check")
-	fmt.Println("    quint verify       Verify audit trail integrity")
-	fmt.Println("    quint connect      See connected services")
+	if serverCount > 0 {
+		fmt.Println("[3/3] Setup complete!")
+		fmt.Println()
+		fmt.Println("  Your AI agents are now secured through Quint.")
+		fmt.Println("  Every tool call is intercepted, risk-scored, and signed.")
+		fmt.Println()
+		fmt.Println("  Next steps:")
+		fmt.Println("    quint dashboard    Open the web dashboard")
+		fmt.Println("    quint status       Quick health check")
+		fmt.Println("    quint verify       Verify audit trail integrity")
+		fmt.Println("    quint connect      See connected services")
+	} else {
+		fmt.Println("[3/3] Partially complete")
+		fmt.Println()
+		fmt.Println("  Keys generated and providers connected, but no MCP servers")
+		fmt.Println("  are being proxied yet.")
+		fmt.Println()
+		fmt.Println("  To finish setup:")
+		fmt.Println("    1. Add MCP servers to your editor (Claude Code, Cursor, etc.)")
+		fmt.Println("    2. Run `quint setup` again to start proxying")
+	}
 	fmt.Println()
 }
 
