@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/Quint-Security/quint-proxy/internal/crypto"
@@ -33,18 +34,27 @@ func NewLogger(db *DB, privateKey, publicKey string, policyJSON map[string]any) 
 
 // LogOpts are the fields for a single audit entry.
 type LogOpts struct {
-	ServerName    string
-	Direction     string // "request" or "response"
-	Method        string
-	MessageID     string
-	ToolName      string
-	ArgumentsJSON string
-	ResponseJSON  string
-	Verdict       string
-	RiskScore     *int
-	RiskLevel     *string
-	AgentID       string
-	AgentName     string
+	ServerName         string
+	Direction          string // "request" or "response"
+	Method             string
+	MessageID          string
+	ToolName           string
+	ArgumentsJSON      string
+	ResponseJSON       string
+	Verdict            string
+	RiskScore          *int
+	RiskLevel          *string
+	AgentID            string
+	AgentName          string
+	ScoringSource      string
+	LocalScore         *int
+	RemoteScore        *int
+	GNNScore           *float64
+	Confidence         *float64
+	ComplianceRefs     []string
+	BehavioralFlags    []string
+	ScoreDecomposition map[string]any
+	Mitigations        []string
 }
 
 // Log creates a signed audit entry and inserts it atomically.
@@ -86,25 +96,63 @@ func (l *Logger) Log(opts LogOpts) {
 			sig = ""
 		}
 
+		// Serialize enrichment fields to JSON
+		var complianceRefsJSON, behavioralFlagsJSON, scoreDecompJSON, mitigationsJSON *string
+
+		if len(opts.ComplianceRefs) > 0 {
+			if b, err := json.Marshal(opts.ComplianceRefs); err == nil {
+				complianceRefsJSON = strPtr(string(b))
+			}
+		}
+
+		if len(opts.BehavioralFlags) > 0 {
+			if b, err := json.Marshal(opts.BehavioralFlags); err == nil {
+				behavioralFlagsJSON = strPtr(string(b))
+			}
+		}
+
+		if opts.ScoreDecomposition != nil && len(opts.ScoreDecomposition) > 0 {
+			if b, err := json.Marshal(opts.ScoreDecomposition); err == nil {
+				scoreDecompJSON = strPtr(string(b))
+			}
+		}
+
+		if len(opts.Mitigations) > 0 {
+			if b, err := json.Marshal(opts.Mitigations); err == nil {
+				mitigationsJSON = strPtr(string(b))
+			}
+		}
+
+		scoringSource := strPtr(opts.ScoringSource)
+
 		return Entry{
-			Timestamp:     timestamp,
-			ServerName:    opts.ServerName,
-			Direction:     opts.Direction,
-			Method:        opts.Method,
-			MessageID:     msgID,
-			ToolName:      toolName,
-			ArgumentsJSON: argsJSON,
-			ResponseJSON:  respJSON,
-			Verdict:       opts.Verdict,
-			RiskScore:     opts.RiskScore,
-			RiskLevel:     opts.RiskLevel,
-			PolicyHash:    l.policyHash,
-			PrevHash:      prevHash,
-			Nonce:         nonce,
-			Signature:     sig,
-			PublicKey:     l.publicKey,
-			AgentID:       agentID,
-			AgentName:     agentName,
+			Timestamp:          timestamp,
+			ServerName:         opts.ServerName,
+			Direction:          opts.Direction,
+			Method:             opts.Method,
+			MessageID:          msgID,
+			ToolName:           toolName,
+			ArgumentsJSON:      argsJSON,
+			ResponseJSON:       respJSON,
+			Verdict:            opts.Verdict,
+			RiskScore:          opts.RiskScore,
+			RiskLevel:          opts.RiskLevel,
+			PolicyHash:         l.policyHash,
+			PrevHash:           prevHash,
+			Nonce:              nonce,
+			Signature:          sig,
+			PublicKey:          l.publicKey,
+			AgentID:            agentID,
+			AgentName:          agentName,
+			ScoringSource:      scoringSource,
+			LocalScore:         opts.LocalScore,
+			RemoteScore:        opts.RemoteScore,
+			GNNScore:           opts.GNNScore,
+			Confidence:         opts.Confidence,
+			ComplianceRefs:     complianceRefsJSON,
+			BehavioralFlags:    behavioralFlagsJSON,
+			ScoreDecomposition: scoreDecompJSON,
+			Mitigations:        mitigationsJSON,
 		}
 	})
 	if err != nil {

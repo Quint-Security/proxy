@@ -228,6 +228,9 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 	// Risk scoring (before audit so score is captured in the log)
 	var riskScore *int
 	var riskLevel *string
+	var score risk.Score
+	var hasScore bool
+
 	if g.riskEngine != nil {
 		subjectID := "gateway:" + backendName
 		if g.identity != nil {
@@ -256,10 +259,11 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 			eventCtx.SessionID = g.identity.SubjectID
 		}
 
-		score := g.riskEngine.ScoreToolCall(toolName, string(params.Arguments), subjectID)
+		score = g.riskEngine.ScoreToolCall(toolName, string(params.Arguments), subjectID)
 		score = g.riskEngine.EnhanceWithRemote(score, toolName, string(params.Arguments), subjectID, backendName, eventCtx)
 		riskScore = &score.Value
 		riskLevel = &score.Level
+		hasScore = true
 
 		riskAction := g.riskEngine.Evaluate(score.Value)
 		if riskAction == "deny" {
@@ -278,7 +282,9 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 			agentID = g.identity.AgentID
 			agentName = g.identity.AgentName
 		}
-		g.logger.Log(audit.LogOpts{
+
+		// Extract remote enrichment data if available
+		logOpts := audit.LogOpts{
 			ServerName:    backendName,
 			Direction:     "request",
 			Method:        "tools/call",
@@ -289,7 +295,26 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 			RiskLevel:     riskLevel,
 			AgentID:       agentID,
 			AgentName:     agentName,
-		})
+		}
+
+		// Add enrichment data from remote scorer
+		if hasScore && score.RemoteEnrichment != nil {
+			enrichment := score.RemoteEnrichment
+			logOpts.ComplianceRefs = enrichment.ComplianceRefs
+			logOpts.BehavioralFlags = enrichment.BehavioralFlags
+			logOpts.ScoreDecomposition = enrichment.ScoreDecomposition
+			logOpts.GNNScore = enrichment.GNNScore
+			logOpts.Confidence = enrichment.Confidence
+			logOpts.Mitigations = enrichment.Mitigations
+			logOpts.ScoringSource = "remote"
+			logOpts.LocalScore = &score.BaseScore
+			logOpts.RemoteScore = riskScore
+		} else if riskScore != nil {
+			logOpts.ScoringSource = "local"
+			logOpts.LocalScore = riskScore
+		}
+
+		g.logger.Log(logOpts)
 	}
 
 	if result.Verdict == intercept.VerdictDeny {
