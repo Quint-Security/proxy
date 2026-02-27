@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Quint-Security/quint-proxy/internal/crypto"
 	_ "modernc.org/sqlite"
 )
 
@@ -359,6 +360,49 @@ func (d *DB) GetRange(opts RangeOpts) ([]Entry, error) {
 		entries = append(entries, e)
 	}
 	return entries, nil
+}
+
+// VerifyChain checks the integrity of the audit chain.
+// Returns the number of verified entries and the first broken link (if any).
+// A broken link is indicated by brokenAt != 0.
+func (d *DB) VerifyChain() (verified int, brokenAt int64, err error) {
+	entries, err := d.GetAll()
+	if err != nil {
+		return 0, 0, fmt.Errorf("get all entries: %w", err)
+	}
+
+	if len(entries) == 0 {
+		return 0, 0, nil
+	}
+
+	// First entry should have empty prev_hash
+	if entries[0].PrevHash != "" {
+		return 0, entries[0].ID, nil
+	}
+
+	verified = 1
+
+	// Verify chain links
+	for i := 1; i < len(entries); i++ {
+		prev := entries[i-1]
+		curr := entries[i]
+
+		// Legacy entries (before chain was added) have empty prev_hash
+		if curr.PrevHash == "" && prev.PrevHash == "" {
+			verified++
+			continue
+		}
+
+		// Compute expected hash from previous signature
+		expectedHash := crypto.SHA256Hex(prev.Signature)
+		if curr.PrevHash != expectedHash {
+			return verified, curr.ID, nil
+		}
+
+		verified++
+	}
+
+	return verified, 0, nil
 }
 
 // Close closes the database.

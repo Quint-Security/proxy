@@ -2,10 +2,13 @@ package intercept
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/Quint-Security/quint-proxy/internal/crypto"
 )
 
 // Action is "allow" or "deny".
@@ -91,6 +94,7 @@ type PolicyConfig struct {
 	ApprovalTimeoutSeconds int            `json:"approval_timeout_seconds,omitempty"`
 	RateLimitRpm           int            `json:"rate_limit_rpm,omitempty"`
 	RateLimitBurst         int            `json:"rate_limit_burst,omitempty"`
+	Signature              string         `json:"_signature,omitempty"` // Ed25519 signature of the canonical policy JSON
 }
 
 // GetApprovalTimeout returns the effective approval timeout in seconds, defaulting to 300.
@@ -241,4 +245,87 @@ func EvaluatePolicy(cfg PolicyConfig, serverName string, toolName string) Verdic
 
 	// Fall back to server default
 	return Verdict(sp.DefaultAction)
+}
+
+// SignPolicy signs a policy config and returns the signed JSON bytes.
+// The signature is computed over the canonical JSON representation (without the _signature field).
+func SignPolicy(policy PolicyConfig, privateKey string) ([]byte, error) {
+	// Remove signature field before signing
+	policy.Signature = ""
+
+	// Marshal to JSON
+	policyJSON, err := json.MarshalIndent(policy, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal policy: %w", err)
+	}
+
+	// Sign the canonical JSON
+	signature, err := crypto.SignData(string(policyJSON), privateKey)
+	if err != nil {
+		return nil, fmt.Errorf("sign policy: %w", err)
+	}
+
+	// Add signature back to policy
+	policy.Signature = signature
+
+	// Marshal again with signature
+	signedJSON, err := json.MarshalIndent(policy, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal signed policy: %w", err)
+	}
+
+	return signedJSON, nil
+}
+
+// VerifyPolicy checks if a policy file has a valid signature.
+// Returns the policy if valid, or a lockdown policy if tampered.
+// The second return value indicates whether the signature was valid.
+func VerifyPolicy(data []byte, publicKey string) (PolicyConfig, bool, error) {
+	var policy PolicyConfig
+	if err := json.Unmarshal(data, &policy); err != nil {
+		return LockdownPolicy(), false, fmt.Errorf("unmarshal policy: %w", err)
+	}
+
+	// If there's no signature, return lockdown policy (fail-closed)
+	if policy.Signature == "" {
+		return LockdownPolicy(), false, fmt.Errorf("policy has no signature")
+	}
+
+	// Store signature and remove it from policy for verification
+	signature := policy.Signature
+	policy.Signature = ""
+
+	// Marshal to JSON (without signature)
+	policyJSON, err := json.MarshalIndent(policy, "", "  ")
+	if err != nil {
+		return LockdownPolicy(), false, fmt.Errorf("marshal policy for verification: %w", err)
+	}
+
+	// Verify signature
+	valid, err := crypto.VerifySignature(string(policyJSON), signature, publicKey)
+	if err != nil {
+		return LockdownPolicy(), false, fmt.Errorf("verify signature: %w", err)
+	}
+
+	if !valid {
+		return LockdownPolicy(), false, fmt.Errorf("invalid signature")
+	}
+
+	// Restore signature
+	policy.Signature = signature
+	return policy, true, nil
+}
+
+// LockdownPolicy returns an ultra-restrictive policy used when tamper detection fails.
+// Denies all access to all servers.
+func LockdownPolicy() PolicyConfig {
+	return PolicyConfig{
+		Version:  1,
+		DataDir:  "~/.quint",
+		LogLevel: "info",
+		FailMode: "closed",
+		Servers: []ServerPolicy{
+			{Server: "*", DefaultAction: ActionDeny, Tools: []ToolRule{}},
+		},
+	}
 }

@@ -204,17 +204,33 @@ func main() {
 
 	r := relay.New(childArgs[0], childArgs[1:], callbacks)
 
-	// Signal handling
+	// Signal handling with audit logging
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
-		<-sigCh
-		qlog.Info("received signal, shutting down")
+		sig := <-sigCh
+		qlog.Info("received signal %v, shutting down gracefully", sig)
+
+		// Log shutdown event to audit database before stopping
+		riskScore := 0
+		riskLevel := "info"
+		logEntry(*serverName, "proxy", "shutdown", "", "",
+			fmt.Sprintf(`{"signal":"%s","reason":"graceful_shutdown"}`, sig.String()),
+			"", "shutdown", &riskScore, &riskLevel, nil)
+
 		r.Stop()
 	}()
 
 	code := r.Start()
 	qlog.Info("child exited with code %d", code)
+
+	// Log normal exit to audit database
+	riskScore := 0
+	riskLevel := "info"
+	logEntry(*serverName, "proxy", "exit", "", "",
+		fmt.Sprintf(`{"exit_code":%d,"reason":"normal_exit"}`, code),
+		"", "exit", &riskScore, &riskLevel, nil)
+
 	cleanup()
 	os.Exit(code)
 }

@@ -59,4 +59,14 @@ var DangerousArgKeywords = []ArgKeyword{
 	{Pattern: regexp.MustCompile(`(?i)\bsecret\b`), Boost: 15, Label: `\bsecret\b`},
 	{Pattern: regexp.MustCompile(`(?i)\btoken\b`), Boost: 10, Label: `\btoken\b`},
 	{Pattern: regexp.MustCompile(`(?i)\b(\.env|credentials)\b`), Boost: 20, Label: `\b(\.env|credentials)\b`},
+
+	// Quint-awareness patterns — commands that suggest the agent is probing for or tampering with Quint
+	{Pattern: regexp.MustCompile(`(?i)\.quint`), Boost: 40, Label: "quint_config_access"},
+	{Pattern: regexp.MustCompile(`(?i)policy\.json`), Boost: 30, Label: "policy_file_access"},
+	{Pattern: regexp.MustCompile(`(?i)quint\.db`), Boost: 40, Label: "audit_db_access"},
+	{Pattern: regexp.MustCompile(`(?i)(pkill|kill|killall).*quint`), Boost: 50, Label: "quint_process_kill"},
+	{Pattern: regexp.MustCompile(`(?i)(pgrep|ps).*quint`), Boost: 20, Label: "quint_process_probe"},
+	{Pattern: regexp.MustCompile(`(?i)servers\.json`), Boost: 30, Label: "mcp_servers_config_access"},
+	{Pattern: regexp.MustCompile(`(?i)original_servers\.json`), Boost: 35, Label: "original_servers_access"},
+	{Pattern: regexp.MustCompile(`(?i)original_shell\.json`), Boost: 35, Label: "original_shell_access"},
 }
