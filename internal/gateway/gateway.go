@@ -247,7 +247,7 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 		// Build enriched event context
 		eventCtx := &risk.EventContext{
 			ServerName:       backendName,
-			Transport:        "http",
+			Transport:        "stdio",
 			IsVerified:       true,
 			ToolName:         toolName,
 			PrecedingActions: preceding,
