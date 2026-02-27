@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package quint.v1;
+
+option go_package = "github.com/Quint-Security/quint-proxy/gen/go/quint/v1;quintv1";
+
+// Risk severity levels for AI agent actions.
+enum RiskLevel {
+  RISK_LEVEL_UNSPECIFIED = 0;
+  RISK_LEVEL_NONE        = 1;
+  RISK_LEVEL_LOW         = 2;
+  RISK_LEVEL_MEDIUM      = 3;
+  RISK_LEVEL_HIGH        = 4;
+  RISK_LEVEL_CRITICAL    = 5;
+}
+
+// Context describing the AI agent action to evaluate.
+message ActionContext {
+  string tool_name  = 1;
+  // JSON-encoded tool arguments.
+  string tool_input = 2;
+  // Resource being accessed.
+  string resource   = 3;
+  string user_id    = 4;
+  // Active policy names.
+  repeated string policies = 5;
+}
+
+// Result of a risk evaluation.
+message RiskAssessment {
+  RiskLevel level      = 1;
+  // Confidence score 0.0–1.0.
+  float confidence     = 2;
+  string reasoning     = 3;
+  repeated string mitigations = 4;
+  // Plaintext justification, max 3 sentences.
+  optional string justification = 5;
+}
+
+message EvaluateRiskRequest {
+  ActionContext context = 1;
+  // Optional client-supplied correlation ID.
+  string request_id    = 2;
+}
+
+message EvaluateRiskResponse {
+  RiskAssessment assessment = 1;
+  string request_id         = 2;
+}
+
+// RiskEvaluationService provides ML-enhanced risk scoring for AI agent actions.
+service RiskEvaluationService {
+  // Evaluate the risk of a single AI agent action.
+  rpc EvaluateRisk(EvaluateRiskRequest) returns (EvaluateRiskResponse);
+  // Bi-directional stream for batch / real-time evaluation.
+  rpc StreamEvaluateRisk(stream EvaluateRiskRequest) returns (stream EvaluateRiskResponse);
+}
