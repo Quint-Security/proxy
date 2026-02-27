@@ -212,6 +212,25 @@ func runInit(args []string) int {
 		}
 		serverPolicies = append(serverPolicies, sp)
 	}
+
+	// Shell policy: monitor shell commands from AI agents
+	// Note: Flagging (rm, chmod, etc.) is handled by risk scoring, not policy.
+	// Policy only supports allow/deny.
+	shellPolicy := intercept.ServerPolicy{
+		Server:        "shell",
+		DefaultAction: intercept.ActionAllow,
+		Tools: []intercept.ToolRule{
+			// Network tools (explicitly allowed)
+			{Tool: "curl", Action: intercept.ActionAllow},
+			{Tool: "wget", Action: intercept.ActionAllow},
+			// Dangerous disk operations (denied)
+			{Tool: "dd", Action: intercept.ActionDeny},
+			{Tool: "mkfs*", Action: intercept.ActionDeny},
+			{Tool: "fdisk", Action: intercept.ActionDeny},
+		},
+	}
+	serverPolicies = append(serverPolicies, shellPolicy)
+
 	// Unknown servers are denied by default (fail-closed)
 	serverPolicies = append(serverPolicies, intercept.ServerPolicy{Server: "*", DefaultAction: intercept.ActionDeny, Tools: []intercept.ToolRule{}})
 
@@ -336,6 +355,20 @@ func runRevert(dryRun bool) {
 				reverted++
 			}
 		}
+	}
+
+	// Revert shell monitoring
+	dataDir := filepath.Join(home, ".quint")
+	originalShellPath := filepath.Join(dataDir, "original_shell.json")
+	if shellData, err := os.ReadFile(originalShellPath); err == nil {
+		var shellConfig map[string]string
+		if json.Unmarshal(shellData, &shellConfig) == nil {
+			if originalShell, ok := shellConfig["shellCommand"]; ok {
+				config["shellCommand"] = originalShell
+				fmt.Println("  Reverted shell monitoring")
+			}
+		}
+		os.Remove(originalShellPath)
 	}
 
 	out, _ := json.MarshalIndent(config, "", "  ")

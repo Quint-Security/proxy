@@ -124,12 +124,16 @@ func runSetup(args []string) {
 	}
 	fmt.Println()
 
+	// Step 2.6: Configure shell monitoring
+	configureShellMonitoring()
+
 	// Step 3: Done
 	if serverCount > 0 {
 		fmt.Println("[3/3] Setup complete!")
 		fmt.Println()
 		fmt.Println("  Your AI agents are now secured through Quint.")
 		fmt.Println("  Every tool call is intercepted, risk-scored, and signed.")
+		fmt.Println("  Shell commands are monitored and audited.")
 		fmt.Println()
 		fmt.Println("  Next steps:")
 		fmt.Println("    quint dashboard    Open the web dashboard")
@@ -170,4 +174,62 @@ var providerMCPServers = map[string]gateway.ServerConfig{
 		Args:    []string{"-y", "@sentry/mcp-server-sentry"},
 		Env:     map[string]string{"SENTRY_AUTH_TOKEN": "__CREDENTIAL:sentry__"},
 	},
+}
+
+// configureShellMonitoring configures Claude Code to use quint as its shell wrapper.
+func configureShellMonitoring() {
+	home, _ := os.UserHomeDir()
+	claudeConfigPath := filepath.Join(home, ".claude.json")
+
+	// Check if Claude Code config exists
+	data, err := os.ReadFile(claudeConfigPath)
+	if err != nil {
+		// Claude Code not installed or configured, skip shell monitoring
+		return
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		return
+	}
+
+	// Get path to this binary
+	self, err := os.Executable()
+	if err != nil {
+		return
+	}
+
+	// Check if shellCommand is already set to quint
+	if existingShell, ok := config["shellCommand"].(string); ok {
+		if strings.Contains(existingShell, "quint") {
+			// Already configured
+			return
+		}
+		// Save original shell command for revert
+		saveOriginalShell(existingShell)
+	}
+
+	// Set shellCommand to quint shell
+	config["shellCommand"] = fmt.Sprintf("%s shell", self)
+
+	// Write updated config
+	updated, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return
+	}
+
+	if err := os.WriteFile(claudeConfigPath, append(updated, '\n'), 0o644); err == nil {
+		fmt.Println("  Configured shell monitoring for Claude Code")
+	}
+}
+
+// saveOriginalShell saves the original shellCommand for revert.
+func saveOriginalShell(originalShell string) {
+	home, _ := os.UserHomeDir()
+	dataDir := filepath.Join(home, ".quint")
+	os.MkdirAll(dataDir, 0o700)
+
+	shellConfig := map[string]string{"shellCommand": originalShell}
+	data, _ := json.MarshalIndent(shellConfig, "", "  ")
+	os.WriteFile(filepath.Join(dataDir, "original_shell.json"), append(data, '\n'), 0o644)
 }

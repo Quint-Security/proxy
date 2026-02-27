@@ -56,6 +56,9 @@ func main() {
 		case "export":
 			runExport(os.Args[2:])
 			return
+		case "shell":
+			runShell(os.Args[2:])
+			return
 
 		// Admin — advanced commands behind a subcommand
 		case "admin":
