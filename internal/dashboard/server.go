@@ -81,6 +81,13 @@ func (s *Server) Start(port int) error {
 	mux.HandleFunc("/api/policy", s.handlePolicy)
 	mux.HandleFunc("/api/events", s.handleSSE)
 
+	// Cloud API proxy routes
+	mux.HandleFunc("/api/cloud/scores", s.handleCloudScores)
+	mux.HandleFunc("/api/cloud/summary", s.handleCloudSummary)
+	mux.HandleFunc("/api/cloud/event/", s.handleCloudEventScore)
+	mux.HandleFunc("/api/cloud/justification", s.handleCloudJustification)
+	mux.HandleFunc("/api/cloud/health", s.handleCloudHealth)
+
 	// Start polling for new audit entries
 	go s.pollAuditUpdates()
 
@@ -455,6 +462,155 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// --- Cloud API Proxy Handlers ---
+
+// handleCloudScores proxies GET /scores/{customer_id}
+func (s *Server) handleCloudScores(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		s.jsonErr(w, 405, "use GET")
+		return
+	}
+
+	cfg := s.getCloudAPIConfig()
+	if cfg == nil {
+		s.jsonErr(w, 503, "cloud API not configured")
+		return
+	}
+
+	// Build query string with customer_id from config
+	q := r.URL.Query()
+	q.Set("customer_id", cfg.CustomerID)
+	url := fmt.Sprintf("%s/scores/%s?%s", strings.TrimSuffix(cfg.URL, "/"), cfg.CustomerID, q.Encode())
+
+	s.proxyCloudRequest(w, url, cfg.APIKey)
+}
+
+// handleCloudSummary proxies GET /scores/{customer_id}/summary
+func (s *Server) handleCloudSummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		s.jsonErr(w, 405, "use GET")
+		return
+	}
+
+	cfg := s.getCloudAPIConfig()
+	if cfg == nil {
+		s.jsonErr(w, 503, "cloud API not configured")
+		return
+	}
+
+	url := fmt.Sprintf("%s/scores/%s/summary", strings.TrimSuffix(cfg.URL, "/"), cfg.CustomerID)
+	s.proxyCloudRequest(w, url, cfg.APIKey)
+}
+
+// handleCloudEventScore proxies GET /scores/event/{event_id}
+func (s *Server) handleCloudEventScore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		s.jsonErr(w, 405, "use GET")
+		return
+	}
+
+	cfg := s.getCloudAPIConfig()
+	if cfg == nil {
+		s.jsonErr(w, 503, "cloud API not configured")
+		return
+	}
+
+	// Extract event_id from path
+	eventID := strings.TrimPrefix(r.URL.Path, "/api/cloud/event/")
+	if eventID == "" {
+		s.jsonErr(w, 400, "event_id is required")
+		return
+	}
+
+	url := fmt.Sprintf("%s/scores/event/%s", strings.TrimSuffix(cfg.URL, "/"), eventID)
+	s.proxyCloudRequest(w, url, cfg.APIKey)
+}
+
+// handleCloudJustification proxies GET /justification?event_id=...
+func (s *Server) handleCloudJustification(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		s.jsonErr(w, 405, "use GET")
+		return
+	}
+
+	cfg := s.getCloudAPIConfig()
+	if cfg == nil {
+		s.jsonErr(w, 503, "cloud API not configured")
+		return
+	}
+
+	eventID := r.URL.Query().Get("event_id")
+	if eventID == "" {
+		s.jsonErr(w, 400, "event_id query parameter is required")
+		return
+	}
+
+	url := fmt.Sprintf("%s/justification?event_id=%s", strings.TrimSuffix(cfg.URL, "/"), eventID)
+	s.proxyCloudRequest(w, url, cfg.APIKey)
+}
+
+// handleCloudHealth proxies GET /health/detailed
+func (s *Server) handleCloudHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		s.jsonErr(w, 405, "use GET")
+		return
+	}
+
+	cfg := s.getCloudAPIConfig()
+	if cfg == nil {
+		s.jsonErr(w, 503, "cloud API not configured")
+		return
+	}
+
+	url := fmt.Sprintf("%s/health/detailed", strings.TrimSuffix(cfg.URL, "/"))
+	s.proxyCloudRequest(w, url, cfg.APIKey)
+}
+
+// getCloudAPIConfig returns the remote API config if available and enabled.
+func (s *Server) getCloudAPIConfig() *intercept.RemoteAPIConfig {
+	if s.policy.Risk == nil || s.policy.Risk.RemoteAPI == nil {
+		return nil
+	}
+	cfg := s.policy.Risk.RemoteAPI
+	if !cfg.Enabled || cfg.URL == "" || cfg.APIKey == "" || cfg.CustomerID == "" {
+		return nil
+	}
+	return cfg
+}
+
+// proxyCloudRequest forwards a request to the cloud API with authentication.
+func (s *Server) proxyCloudRequest(w http.ResponseWriter, url, apiKey string) {
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		s.jsonErr(w, 500, "failed to build request: "+err.Error())
+		return
+	}
+
+	req.Header.Set("X-API-Key", apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		s.jsonErr(w, 502, "cloud API unreachable: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	// Copy status code and content-type
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+
+	// Copy response body
+	var buf strings.Builder
+	if _, err := buf.ReadFrom(resp.Body); err != nil {
+		fmt.Fprintf(w, `{"error": "failed to read cloud API response"}`)
+		return
+	}
+	w.Write([]byte(buf.String()))
 }
 
 // spaHandler serves static files and falls back to .html extension or index.html
