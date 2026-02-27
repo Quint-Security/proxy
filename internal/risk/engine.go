@@ -5,6 +5,7 @@ import (
 	"regexp"
 
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
+	qlog "github.com/Quint-Security/quint-proxy/internal/log"
 )
 
 // Thresholds control risk-based actions.
@@ -228,6 +229,7 @@ func (e *Engine) ScoreToolCall(toolName, argsJSON, subjectID string) Score {
 // Returns the local score unchanged if no remote scorer is configured or on failure.
 // ctx may be nil for backward compatibility.
 func (e *Engine) EnhanceWithRemote(localScore Score, toolName, argsJSON, subjectID, serverName string, ctx *EventContext) Score {
+	qlog.Info("EnhanceWithRemote called: remote=%v server=%s tool=%s", e.remote != nil, serverName, toolName)
 	if e.remote == nil {
 		return localScore
 	}
