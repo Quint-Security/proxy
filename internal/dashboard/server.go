@@ -652,11 +652,22 @@ type spaHandler struct {
 func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
+	// Strip trailing slash to prevent redirect loops from http.FileServer
+	// (e.g., /audit/ → /audit, but keep / as-is)
+	if path != "/" && strings.HasSuffix(path, "/") {
+		path = strings.TrimSuffix(path, "/")
+		r.URL.Path = path
+	}
+
 	// Try exact path first (for static assets like /_next/*, .css, .js)
 	if f, err := h.fs.Open(path); err == nil {
+		stat, statErr := f.Stat()
 		f.Close()
-		http.FileServer(h.fs).ServeHTTP(w, r)
-		return
+		// Only serve if it's a file, not a directory (directories cause redirect loops)
+		if statErr == nil && !stat.IsDir() {
+			http.FileServer(h.fs).ServeHTTP(w, r)
+			return
+		}
 	}
 
 	// Try path + .html (e.g., /audit → /audit.html)
