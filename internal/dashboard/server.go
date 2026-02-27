@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -634,12 +635,12 @@ func (s *Server) proxyCloudRequest(w http.ResponseWriter, url, apiKey string) {
 	w.WriteHeader(resp.StatusCode)
 
 	// Copy response body
-	var buf strings.Builder
-	if _, err := buf.ReadFrom(resp.Body); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
 		fmt.Fprintf(w, `{"error": "failed to read cloud API response"}`)
 		return
 	}
-	w.Write([]byte(buf.String()))
+	w.Write(body)
 }
 
 // spaHandler serves static files and falls back to .html extension or index.html

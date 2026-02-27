@@ -362,6 +362,11 @@ func (d *DB) GetRange(opts RangeOpts) ([]Entry, error) {
 	return entries, nil
 }
 
+// GetAll returns all audit entries in ascending order for chain verification.
+func (d *DB) GetAll() ([]Entry, error) {
+	return d.GetRange(RangeOpts{})
+}
+
 // VerifyChain checks the integrity of the audit chain.
 // Returns the number of verified entries and the first broken link (if any).
 // A broken link is indicated by brokenAt != 0.
