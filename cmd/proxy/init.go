@@ -231,8 +231,9 @@ func runInit(args []string) int {
 	}
 	serverPolicies = append(serverPolicies, shellPolicy)
 
-	// Unknown servers are denied by default (fail-closed)
-	serverPolicies = append(serverPolicies, intercept.ServerPolicy{Server: "*", DefaultAction: intercept.ActionDeny, Tools: []intercept.ToolRule{}})
+	// Unknown servers are allowed by default with deny rules
+	// Users can use --role strict for fail-closed behavior
+	serverPolicies = append(serverPolicies, intercept.ServerPolicy{Server: "*", DefaultAction: intercept.ActionAllow, Tools: []intercept.ToolRule{}})
 
 	policy := intercept.PolicyConfig{
 		Version: 1, DataDir: "~/.quint", LogLevel: "info", Servers: serverPolicies,
@@ -249,11 +250,19 @@ func runInit(args []string) int {
 		fmt.Printf("  Policy: %s (created%s)\n", policyPath, roleLabel)
 		if role == nil {
 			fmt.Println("           Detected servers: allow with deny rules for destructive/shell/sensitive ops")
-			fmt.Println("           Unknown servers:  denied (fail-closed)")
+			fmt.Println("           Unknown servers:  allowed (fail-open)")
 			fmt.Println("           Customize: edit policy.json or re-run with --role <preset>")
 		}
 	} else {
-		fmt.Printf("  Policy: %s (exists, not overwritten)\n", policyPath)
+		// Policy exists — merge in new servers
+		merged, added := mergePolicyServers(policyPath, servers, role, defaultDenyRules)
+		if added > 0 {
+			fmt.Printf("  Policy: %s (merged %d new server(s))\n", policyPath, added)
+		} else {
+			fmt.Printf("  Policy: %s (all servers present)\n", policyPath)
+		}
+		// Replace in-memory policy with merged one for subsequent operations
+		policy = merged
 	}
 
 	// Gateway mode: generate servers.json and replace all MCP entries with one "quint" entry
@@ -860,4 +869,77 @@ func rolePresetNames() []string {
 		names = append(names, k)
 	}
 	return names
+}
+
+// mergePolicyServers merges new servers into an existing policy.json.
+// Returns the merged policy and the count of servers added.
+func mergePolicyServers(policyPath string, servers []detectedServer, role *rolePreset, defaultDenyRules []intercept.ToolRule) (intercept.PolicyConfig, int) {
+	// Load existing policy
+	data, err := os.ReadFile(policyPath)
+	if err != nil {
+		return intercept.PolicyConfig{}, 0
+	}
+
+	var existing intercept.PolicyConfig
+	if err := json.Unmarshal(data, &existing); err != nil {
+		return intercept.PolicyConfig{}, 0
+	}
+
+	// Build a map of existing server names
+	existingServers := make(map[string]bool)
+	for _, sp := range existing.Servers {
+		existingServers[sp.Server] = true
+	}
+
+	// Find new servers that aren't in the policy
+	added := 0
+	insertPos := len(existing.Servers)
+
+	// Find where to insert (before shell and wildcard policies)
+	for i, sp := range existing.Servers {
+		if sp.Server == "shell" || sp.Server == "*" {
+			insertPos = i
+			break
+		}
+	}
+
+	newPolicies := make([]intercept.ServerPolicy, 0)
+	for _, s := range servers {
+		if existingServers[s.Name] {
+			continue
+		}
+		sp := intercept.ServerPolicy{
+			Server:        s.Name,
+			DefaultAction: intercept.ActionAllow,
+			Tools:         []intercept.ToolRule{},
+		}
+		if role != nil {
+			sp.DefaultAction = role.DefaultAction
+			sp.Tools = append(sp.Tools, role.Tools...)
+		} else {
+			sp.Tools = append(sp.Tools, defaultDenyRules...)
+		}
+		newPolicies = append(newPolicies, sp)
+		added++
+	}
+
+	if added > 0 {
+		// Insert new policies before shell/wildcard policies
+		result := make([]intercept.ServerPolicy, 0, len(existing.Servers)+len(newPolicies))
+		result = append(result, existing.Servers[:insertPos]...)
+		result = append(result, newPolicies...)
+		result = append(result, existing.Servers[insertPos:]...)
+		existing.Servers = result
+
+		// Write updated policy back
+		updatedData, _ := json.MarshalIndent(existing, "", "  ")
+		os.WriteFile(policyPath, append(updatedData, '\n'), 0o644)
+
+		// Log what was added
+		for _, sp := range newPolicies {
+			fmt.Printf("           Added server: %s (allow with deny rules)\n", sp.Server)
+		}
+	}
+
+	return existing, added
 }

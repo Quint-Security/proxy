@@ -135,7 +135,10 @@ func runSetup(args []string) {
 	}
 	fmt.Println()
 
-	// Step 2.6: Configure shell monitoring
+	// Step 2.6: Configure cloud risk scoring
+	configureCloudRiskScoring(reader, dataDir)
+
+	// Step 2.7: Configure shell monitoring
 	configureShellMonitoring()
 
 	// Step 3: Done
@@ -243,4 +246,107 @@ func saveOriginalShell(originalShell string) {
 	shellConfig := map[string]string{"shellCommand": originalShell}
 	data, _ := json.MarshalIndent(shellConfig, "", "  ")
 	os.WriteFile(filepath.Join(dataDir, "original_shell.json"), append(data, '\n'), 0o644)
+}
+
+// configureCloudRiskScoring prompts the user to configure cloud risk scoring.
+func configureCloudRiskScoring(reader *bufio.Reader, dataDir string) {
+	// Import the intercept package types
+	policyPath := filepath.Join(dataDir, "policy.json")
+
+	// Check if policy.json exists
+	data, err := os.ReadFile(policyPath)
+	if err != nil {
+		// No policy.json yet, skip cloud config
+		return
+	}
+
+	// Parse existing policy
+	var policy map[string]any
+	if err := json.Unmarshal(data, &policy); err != nil {
+		return
+	}
+
+	// Check if risk config already exists
+	if risk, ok := policy["risk"].(map[string]any); ok {
+		if riskAPI, ok := risk["risk_api"].(map[string]any); ok {
+			if url, ok := riskAPI["url"].(string); ok && url != "" {
+				// Already configured
+				return
+			}
+		}
+	}
+
+	// Prompt user
+	fmt.Print("  Configure cloud risk scoring? [y/N] ")
+	answer, _ := reader.ReadString('\n')
+	answer = strings.TrimSpace(strings.ToLower(answer))
+
+	if answer != "y" && answer != "yes" {
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("  Cloud risk scoring configuration:")
+
+	// Prompt for API URL
+	fmt.Print("    API URL (default: https://api-production-56df.up.railway.app): ")
+	apiURL, _ := reader.ReadString('\n')
+	apiURL = strings.TrimSpace(apiURL)
+	if apiURL == "" {
+		apiURL = "https://api-production-56df.up.railway.app"
+	}
+
+	// Prompt for API key
+	fmt.Print("    API Key: ")
+	apiKey, _ := reader.ReadString('\n')
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		fmt.Println("    Skipping cloud risk scoring (no API key provided)")
+		return
+	}
+
+	// Prompt for customer ID
+	fmt.Print("    Customer ID: ")
+	customerID, _ := reader.ReadString('\n')
+	customerID = strings.TrimSpace(customerID)
+	if customerID == "" {
+		fmt.Println("    Skipping cloud risk scoring (no customer ID provided)")
+		return
+	}
+
+	// Build risk config
+	riskConfig := map[string]any{
+		"flag":       25,
+		"deny":       40,
+		"risk_api": map[string]any{
+			"url":         apiURL,
+			"api_key":     apiKey,
+			"customer_id": customerID,
+			"enabled":     true,
+			"timeout_ms":  15000,
+		},
+	}
+
+	// Merge into existing policy
+	if existingRisk, ok := policy["risk"].(map[string]any); ok {
+		// Preserve existing risk settings, only add risk_api
+		existingRisk["risk_api"] = riskConfig["risk_api"]
+	} else {
+		// Create new risk config
+		policy["risk"] = riskConfig
+	}
+
+	// Write updated policy
+	updatedData, err := json.MarshalIndent(policy, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "    Failed to serialize policy: %v\n", err)
+		return
+	}
+
+	if err := os.WriteFile(policyPath, append(updatedData, '\n'), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "    Failed to write policy: %v\n", err)
+		return
+	}
+
+	fmt.Println("    Cloud risk scoring configured successfully")
 }
