@@ -36,7 +36,7 @@ func (c RemoteConfig) GetTimeout() time.Duration {
 	if c.TimeoutMs > 0 {
 		return time.Duration(c.TimeoutMs) * time.Millisecond
 	}
-	return 3 * time.Second
+	return 15 * time.Second
 }
 
 // RemoteScorer calls an external risk API to enhance local scoring.
