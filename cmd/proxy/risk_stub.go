@@ -43,7 +43,8 @@ func initRisk(dataDir string, policy intercept.PolicyConfig, scoreTool *scoreFun
 			s = grpcClient.EnhanceScore(s, toolName, argsJSON, subjectID, serverName)
 		}
 
-		// Build event context for remote enrichment
+		// Classify the action and build event context for remote enrichment
+		action := intercept.ClassifyAction(serverName, toolName, "tools/call")
 		var preceding []string
 		if sessionTracker != nil {
 			preceding = sessionTracker.Recent(subjectID)
@@ -56,6 +57,7 @@ func initRisk(dataDir string, policy intercept.PolicyConfig, scoreTool *scoreFun
 			ToolName:         toolName,
 			PrecedingActions: preceding,
 			SessionID:        subjectID,
+			CanonicalAction:  action,
 		}
 
 		s = engine.EnhanceWithRemote(s, toolName, argsJSON, subjectID, serverName, eventCtx)

@@ -248,6 +248,7 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 			IsVerified:       true,
 			ToolName:         toolName,
 			PrecedingActions: preceding,
+			CanonicalAction:  action,
 		}
 		if g.identity != nil {
 			eventCtx.AgentID = g.identity.AgentID

@@ -10,4 +10,5 @@ type EventContext struct {
 	ToolName         string
 	PrecedingActions []string
 	SessionID        string
+	CanonicalAction  string // e.g. "mcp:github:list_repos.list" — set by ClassifyAction
 }

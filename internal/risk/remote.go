@@ -6,10 +6,21 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	qlog "github.com/Quint-Security/quint-proxy/internal/log"
 )
+
+// sanitize replaces characters that break the action taxonomy format.
+func sanitize(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, ":", "_")
+	s = strings.ReplaceAll(s, "-", "_")
+	s = strings.ReplaceAll(s, " ", "_")
+	s = strings.ReplaceAll(s, "/", "_")
+	return s
+}
 
 // RemoteConfig configures the remote risk scoring API.
 type RemoteConfig struct {
@@ -133,7 +144,7 @@ func (r *RemoteScorer) EnhanceScore(localScore Score, toolName, argsJSON, subjec
 		EventID:    fmt.Sprintf("%s:%s:%d", serverName, toolName, time.Now().UnixMilli()),
 		CustomerID: r.config.CustomerID,
 		AgentID:    subjectID,
-		Action:     fmt.Sprintf("mcp:%s:%s.invoke", serverName, toolName),
+		Action:     fmt.Sprintf("mcp:%s:%s.invoke", sanitize(serverName), sanitize(toolName)),
 		Timestamp:  time.Now().UTC().Format(time.RFC3339),
 		Metadata: map[string]any{
 			"local_score": localScore.Value,
@@ -175,8 +186,10 @@ func (r *RemoteScorer) EnhanceScore(localScore Score, toolName, argsJSON, subjec
 			req.PrecedingActions = ctx.PrecedingActions
 		}
 
-		// Override action with the canonical format if we have a tool name
-		if ctx.ToolName != "" {
+		// Override action with the canonical format if available
+		if ctx.CanonicalAction != "" {
+			req.Action = ctx.CanonicalAction
+		} else if ctx.ToolName != "" {
 			req.Action = fmt.Sprintf("mcp:%s:%s.invoke", ctx.ServerName, ctx.ToolName)
 		}
 	}

@@ -92,9 +92,11 @@ func inferVerb(toolName string) string {
 }
 
 // sanitizeSegment replaces characters that would break the taxonomy format.
+// The risk API requires segments to match [a-z0-9_.]+ (no hyphens, colons, etc).
 func sanitizeSegment(s string) string {
 	s = strings.ToLower(s)
 	s = strings.ReplaceAll(s, ":", "_")
+	s = strings.ReplaceAll(s, "-", "_")
 	s = strings.ReplaceAll(s, " ", "_")
 	s = strings.ReplaceAll(s, "/", "_")
 	return s
