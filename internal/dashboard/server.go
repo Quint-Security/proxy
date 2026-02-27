@@ -56,7 +56,7 @@ func New(dataDir string, policy intercept.PolicyConfig) (*Server, error) {
 		return nil, fmt.Errorf("open approval db: %w", err)
 	}
 
-	return &Server{
+	s := &Server{
 		auditDB:    auditDB,
 		authDB:     authDB,
 		approvalDB: approvalDB,
@@ -64,7 +64,17 @@ func New(dataDir string, policy intercept.PolicyConfig) (*Server, error) {
 		dataDir:    dataDir,
 		sseClients: make(map[chan string]struct{}),
 		stopPoll:   make(chan struct{}),
-	}, nil
+	}
+
+	// Verify audit chain integrity on startup
+	verified, brokenAt, err := auditDB.VerifyChain()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: audit chain verification failed: %v\n", err)
+	} else if brokenAt != 0 {
+		fmt.Fprintf(os.Stderr, "WARNING: Audit chain tamper detected at entry #%d (verified %d entries)\n", brokenAt, verified)
+	}
+
+	return s, nil
 }
 
 // Start starts the dashboard on the given port.
@@ -182,6 +192,25 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"status":     "not_configured",
 		}
 	}
+
+	// Add audit chain integrity check
+	verified, brokenAt, err := s.auditDB.VerifyChain()
+	chainInfo := map[string]any{
+		"verified_entries": verified,
+	}
+	if err != nil {
+		chainInfo["status"] = "error"
+		chainInfo["error"] = err.Error()
+	} else if brokenAt != 0 {
+		chainInfo["status"] = "tamper_detected"
+		chainInfo["broken_at_entry"] = brokenAt
+		chainInfo["warning"] = "Audit log tampering detected - integrity compromised"
+	} else if verified > 0 {
+		chainInfo["status"] = "verified"
+	} else {
+		chainInfo["status"] = "empty"
+	}
+	response["audit_integrity"] = chainInfo
 
 	s.json(w, 200, response)
 }
