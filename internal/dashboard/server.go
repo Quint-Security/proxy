@@ -612,7 +612,7 @@ func (s *Server) getCloudAPIConfig() *intercept.RemoteAPIConfig {
 
 // proxyCloudRequest forwards a request to the cloud API with authentication.
 func (s *Server) proxyCloudRequest(w http.ResponseWriter, url, apiKey string) {
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second}
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
