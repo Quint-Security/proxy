@@ -306,7 +306,10 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 			logOpts.GNNScore = enrichment.GNNScore
 			logOpts.Confidence = enrichment.Confidence
 			logOpts.Mitigations = enrichment.Mitigations
-			logOpts.ScoringSource = "remote"
+			logOpts.ScoringSource = enrichment.ScoringSource
+			if logOpts.ScoringSource == "" {
+				logOpts.ScoringSource = "remote"
+			}
 			logOpts.LocalScore = &score.BaseScore
 			logOpts.RemoteScore = riskScore
 		} else if riskScore != nil {
