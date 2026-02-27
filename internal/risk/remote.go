@@ -48,48 +48,142 @@ func NewRemoteScorer(cfg *RemoteConfig) *RemoteScorer {
 	}
 }
 
-// eventRequest is the payload sent to POST /events.
+// --- Request payload types matching AgentEventCreate schema ---
+
 type eventRequest struct {
-	EventID    string          `json:"event_id"`
-	CustomerID string          `json:"customer_id"`
-	AgentID    string          `json:"agent_id"`
-	Action     string          `json:"action"`
-	Parameters json.RawMessage `json:"parameters"`
-	Timestamp  string          `json:"timestamp"`
-	LocalScore int             `json:"local_score"`
-	LocalLevel string          `json:"local_level"`
+	EventID            string              `json:"event_id"`
+	CustomerID         string              `json:"customer_id"`
+	AgentID            string              `json:"agent_id,omitempty"`
+	Action             string              `json:"action"`
+	TargetResource     string              `json:"target_resource,omitempty"`
+	DataFieldsAccessed []string            `json:"data_fields_accessed,omitempty"`
+	UserContext        string              `json:"user_context,omitempty"`
+	Metadata           map[string]any      `json:"metadata,omitempty"`
+	Timestamp          string              `json:"timestamp"`
+	Agent              *AgentInfoPayload   `json:"agent,omitempty"`
+	Session            *SessionInfoPayload `json:"session,omitempty"`
+	Target             *TargetInfoPayload  `json:"target,omitempty"`
+	Parameters         json.RawMessage     `json:"parameters,omitempty"`
+	MCPContext         *MCPContextPayload  `json:"mcp_context,omitempty"`
+	PrecedingActions   []string            `json:"preceding_actions,omitempty"`
 }
 
-// eventResponse is the response from POST /events.
+// AgentInfoPayload describes the agent making the action.
+type AgentInfoPayload struct {
+	AgentID   string `json:"agent_id"`
+	AgentType string `json:"agent_type,omitempty"`
+	Framework string `json:"framework,omitempty"`
+	Model     string `json:"model,omitempty"`
+}
+
+// SessionInfoPayload describes the session context.
+type SessionInfoPayload struct {
+	SessionID string `json:"session_id"`
+	UserID    string `json:"user_id,omitempty"`
+}
+
+// TargetInfoPayload describes the target resource.
+type TargetInfoPayload struct {
+	ResourceType     string `json:"resource_type,omitempty"`
+	ResourceID       string `json:"resource_id,omitempty"`
+	SensitivityLevel int    `json:"sensitivity_level,omitempty"`
+}
+
+// MCPContextPayload describes the MCP server context.
+type MCPContextPayload struct {
+	ServerName string `json:"server_name"`
+	Transport  string `json:"transport,omitempty"`
+	IsVerified bool   `json:"is_verified"`
+	ToolName   string `json:"tool_name,omitempty"`
+}
+
+// --- Response types matching full scoring API response ---
+
 type eventResponse struct {
-	Score         int      `json:"score"`
-	RiskLevel     string   `json:"risk_level"`
-	Violations    []string `json:"violations"`
-	Reasoning     string   `json:"reasoning"`
-	ScoringSource string   `json:"scoring_source"`
+	EventID            string         `json:"event_id"`
+	Score              int            `json:"score"`
+	RiskLevel          string         `json:"risk_level"`
+	Violations         []string       `json:"violations"`
+	Reasoning          string         `json:"reasoning"`
+	ScoringSource      string         `json:"scoring_source"`
+	ComplianceRefs     []string       `json:"compliance_refs"`
+	Mitigations        []string       `json:"mitigations"`
+	BehavioralFlags    []string       `json:"behavioral_flags"`
+	ScoreDecomposition map[string]any `json:"score_decomposition"`
+	GNNScore           *float64       `json:"gnn_score"`
+	Confidence         *float64       `json:"confidence"`
+}
+
+// RemoteEnrichment holds the extra fields from the remote scoring response
+// that should be persisted in the audit log.
+type RemoteEnrichment struct {
+	ComplianceRefs     []string       `json:"compliance_refs,omitempty"`
+	BehavioralFlags    []string       `json:"behavioral_flags,omitempty"`
+	ScoreDecomposition map[string]any `json:"score_decomposition,omitempty"`
+	GNNScore           *float64       `json:"gnn_score,omitempty"`
+	Confidence         *float64       `json:"confidence,omitempty"`
+	Mitigations        []string       `json:"mitigations,omitempty"`
 }
 
 // EnhanceScore calls the remote API and returns an enhanced score.
 // Falls back to localScore on any failure (timeout, network error, bad response).
-func (r *RemoteScorer) EnhanceScore(localScore Score, toolName, argsJSON, subjectID, serverName string) Score {
+// ctx may be nil for backward compatibility.
+func (r *RemoteScorer) EnhanceScore(localScore Score, toolName, argsJSON, subjectID, serverName string, ctx *EventContext) Score {
 	req := eventRequest{
 		EventID:    fmt.Sprintf("%s:%s:%d", serverName, toolName, time.Now().UnixMilli()),
 		CustomerID: r.config.CustomerID,
 		AgentID:    subjectID,
-		Action:     fmt.Sprintf("tool_call:%s.%s", serverName, toolName),
+		Action:     fmt.Sprintf("mcp:%s:%s.invoke", serverName, toolName),
 		Timestamp:  time.Now().UTC().Format(time.RFC3339),
-		LocalScore: localScore.Value,
-		LocalLevel: localScore.Level,
+		Metadata: map[string]any{
+			"local_score": localScore.Value,
+			"local_level": localScore.Level,
+		},
 	}
 
-	// Include tool arguments if available
+	// Include tool arguments
 	if argsJSON != "" {
 		req.Parameters = json.RawMessage(argsJSON)
 	} else {
 		req.Parameters = json.RawMessage("{}")
 	}
 
+	// Enrich from EventContext if provided
+	if ctx != nil {
+		if ctx.AgentID != "" {
+			req.Agent = &AgentInfoPayload{
+				AgentID:   ctx.AgentID,
+				AgentType: "mcp_client",
+				Framework: "quint-proxy",
+			}
+		}
+
+		if ctx.SessionID != "" {
+			req.Session = &SessionInfoPayload{
+				SessionID: ctx.SessionID,
+			}
+		}
+
+		req.MCPContext = &MCPContextPayload{
+			ServerName: ctx.ServerName,
+			Transport:  ctx.Transport,
+			IsVerified: ctx.IsVerified,
+			ToolName:   ctx.ToolName,
+		}
+
+		if len(ctx.PrecedingActions) > 0 {
+			req.PrecedingActions = ctx.PrecedingActions
+		}
+
+		// Override action with the canonical format if we have a tool name
+		if ctx.ToolName != "" {
+			req.Action = fmt.Sprintf("mcp:%s:%s.invoke", ctx.ServerName, ctx.ToolName)
+		}
+	}
+
 	body, _ := json.Marshal(req)
+
+	qlog.Info("remote risk API request: %s", string(body))
 
 	httpReq, err := http.NewRequest("POST", r.config.URL+"/events", bytes.NewReader(body))
 	if err != nil {
@@ -110,6 +204,8 @@ func (r *RemoteScorer) EnhanceScore(localScore Score, toolName, argsJSON, subjec
 
 	respBody, _ := io.ReadAll(resp.Body)
 
+	qlog.Info("remote risk API response [%d]: %s", resp.StatusCode, string(respBody))
+
 	if resp.StatusCode != 200 {
 		qlog.Warn("remote risk: API returned %d, falling back to local score", resp.StatusCode)
 		return localScore
@@ -121,8 +217,9 @@ func (r *RemoteScorer) EnhanceScore(localScore Score, toolName, argsJSON, subjec
 		return localScore
 	}
 
-	qlog.Info("remote risk: action=%s local=%d remote=%d level=%s source=%s reasoning=%q violations=%v",
-		req.Action, localScore.Value, result.Score, result.RiskLevel, result.ScoringSource, result.Reasoning, result.Violations)
+	qlog.Info("remote risk: action=%s local=%d remote=%d level=%s source=%s reasoning=%q violations=%v gnn=%v confidence=%v",
+		req.Action, localScore.Value, result.Score, result.RiskLevel, result.ScoringSource,
+		result.Reasoning, result.Violations, result.GNNScore, result.Confidence)
 
 	// Only use remote score if it's higher than local (never lower the security bar)
 	finalScore := localScore.Value
@@ -147,7 +244,7 @@ func (r *RemoteScorer) EnhanceScore(localScore Score, toolName, argsJSON, subjec
 
 	qlog.Debug("remote risk: local=%d → remote=%d (final=%d, level=%s)", localScore.Value, result.Score, finalScore, level)
 
-	return Score{
+	enriched := Score{
 		Value:         finalScore,
 		BaseScore:     localScore.BaseScore,
 		ArgBoost:      localScore.ArgBoost,
@@ -155,4 +252,16 @@ func (r *RemoteScorer) EnhanceScore(localScore Score, toolName, argsJSON, subjec
 		Level:         level,
 		Reasons:       reasons,
 	}
+
+	// Attach enrichment data for audit logging
+	enriched.RemoteEnrichment = &RemoteEnrichment{
+		ComplianceRefs:     result.ComplianceRefs,
+		BehavioralFlags:    result.BehavioralFlags,
+		ScoreDecomposition: result.ScoreDecomposition,
+		GNNScore:           result.GNNScore,
+		Confidence:         result.Confidence,
+		Mitigations:        result.Mitigations,
+	}
+
+	return enriched
 }

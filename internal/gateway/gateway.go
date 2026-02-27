@@ -18,24 +18,26 @@ import (
 // Gateway is the MCP multiplexer. It presents as a single MCP server to the
 // agent, routing tool calls to the appropriate downstream backend.
 type Gateway struct {
-	backends   map[string]Backend
-	toolIndex  map[string]string // namespacedTool → backendName
-	allTools   []Tool            // merged tool list with namespaced names
-	policy     intercept.PolicyConfig
-	logger     *audit.Logger
-	riskEngine *risk.Engine
-	identity   *auth.Identity
+	backends       map[string]Backend
+	toolIndex      map[string]string // namespacedTool → backendName
+	allTools       []Tool            // merged tool list with namespaced names
+	policy         intercept.PolicyConfig
+	logger         *audit.Logger
+	riskEngine     *risk.Engine
+	identity       *auth.Identity
+	sessionTracker *risk.SessionTracker
 }
 
 // New creates a gateway from the given config.
 func New(cfg *Config, opts GatewayOpts) (*Gateway, error) {
 	g := &Gateway{
-		backends:   make(map[string]Backend),
-		toolIndex:  make(map[string]string),
-		policy:     opts.Policy,
-		logger:     opts.Logger,
-		riskEngine: opts.RiskEngine,
-		identity:   opts.Identity,
+		backends:       make(map[string]Backend),
+		toolIndex:      make(map[string]string),
+		policy:         opts.Policy,
+		logger:         opts.Logger,
+		riskEngine:     opts.RiskEngine,
+		identity:       opts.Identity,
+		sessionTracker: risk.NewSessionTracker(20, 0),
 	}
 
 	// Create backends
@@ -231,17 +233,39 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 		if g.identity != nil {
 			subjectID = g.identity.SubjectID
 		}
+
+		// Classify action to canonical format
+		action := intercept.ClassifyAction(backendName, toolName, "tools/call")
+
+		// Record in session tracker and get preceding actions
+		g.sessionTracker.Record(subjectID, action)
+		preceding := g.sessionTracker.Recent(subjectID)
+
+		// Build enriched event context
+		eventCtx := &risk.EventContext{
+			ServerName:       backendName,
+			Transport:        "http",
+			IsVerified:       true,
+			ToolName:         toolName,
+			PrecedingActions: preceding,
+		}
+		if g.identity != nil {
+			eventCtx.AgentID = g.identity.AgentID
+			eventCtx.AgentName = g.identity.AgentName
+			eventCtx.SessionID = g.identity.SubjectID
+		}
+
 		score := g.riskEngine.ScoreToolCall(toolName, string(params.Arguments), subjectID)
-		score = g.riskEngine.EnhanceWithRemote(score, toolName, string(params.Arguments), subjectID, backendName)
+		score = g.riskEngine.EnhanceWithRemote(score, toolName, string(params.Arguments), subjectID, backendName, eventCtx)
 		riskScore = &score.Value
 		riskLevel = &score.Level
 
-		action := g.riskEngine.Evaluate(score.Value)
-		if action == "deny" {
+		riskAction := g.riskEngine.Evaluate(score.Value)
+		if riskAction == "deny" {
 			qlog.Warn("risk-denied %s.%s (score=%d)", backendName, toolName, score.Value)
 			return g.jsonRpcError(id, -32600, fmt.Sprintf("Quint: %s.%s blocked by risk score (%d)", backendName, toolName, score.Value))
 		}
-		if action == "flag" {
+		if riskAction == "flag" {
 			qlog.Warn("high-risk %s.%s (score=%d, level=%s)", backendName, toolName, score.Value, score.Level)
 		}
 	}
