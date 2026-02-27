@@ -24,7 +24,7 @@ type riskResult struct {
 
 // Function type aliases used across phases.
 type logEntryFunc func(serverName, direction, method, messageID, toolName, argsJSON, respJSON string, verdict string, riskScore *int, riskLevel *string)
-type scoreFunc func(toolName, argsJSON, subjectID string) *riskResult
+type scoreFunc func(toolName, argsJSON, subjectID, serverName string) *riskResult
 type evalFunc func(score int) string
 type revokeFunc func(subjectID string) bool
 
@@ -173,7 +173,7 @@ func main() {
 
 	// Initialize with stubs — phases replace these
 	var logEntry logEntryFunc = func(_, _, _, _, _, _, _ string, _ string, _ *int, _ *string) {}
-	var scoreTool scoreFunc = func(_, _, _ string) *riskResult { return nil }
+	var scoreTool scoreFunc = func(_, _, _, _ string) *riskResult { return nil }
 	var evalRisk evalFunc = func(_ int) string { return "allow" }
 	var revoke revokeFunc = func(_ string) bool { return false }
 
@@ -268,8 +268,14 @@ func handleParentMessage(
 		return ""
 	}
 
+	// Classify action and track in session
+	action := intercept.ClassifyAction(serverName, result.ToolName, "tools/call")
+	if sessionTracker != nil {
+		sessionTracker.Record(subjectID, action)
+	}
+
 	// Tool call — score risk
-	risk := scoreTool(result.ToolName, result.ArgumentsJson, subjectID)
+	risk := scoreTool(result.ToolName, result.ArgumentsJson, subjectID, serverName)
 	var riskScore *int
 	var riskLevel *string
 	if risk != nil {

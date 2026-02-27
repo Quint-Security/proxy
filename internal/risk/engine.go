@@ -25,12 +25,13 @@ var DefaultThresholds = Thresholds{
 
 // Score is the result of risk evaluation.
 type Score struct {
-	Value         int      // Final score 0-100 (capped)
-	BaseScore     int      // Base score from tool pattern
-	ArgBoost      int      // Boost from argument analysis
-	BehaviorBoost int      // Boost from repeated behavior
-	Level         string   // "low", "medium", "high", "critical"
-	Reasons       []string // Human-readable reasons
+	Value            int               // Final score 0-100 (capped)
+	BaseScore        int               // Base score from tool pattern
+	ArgBoost         int               // Boost from argument analysis
+	BehaviorBoost    int               // Boost from repeated behavior
+	Level            string            // "low", "medium", "high", "critical"
+	Reasons          []string          // Human-readable reasons
+	RemoteEnrichment *RemoteEnrichment // Enrichment from remote scoring API (nil if local-only)
 }
 
 // Engine performs risk scoring for tool calls.
@@ -225,11 +226,12 @@ func (e *Engine) ScoreToolCall(toolName, argsJSON, subjectID string) Score {
 
 // EnhanceWithRemote sends the local score to the remote API for enrichment.
 // Returns the local score unchanged if no remote scorer is configured or on failure.
-func (e *Engine) EnhanceWithRemote(localScore Score, toolName, argsJSON, subjectID, serverName string) Score {
+// ctx may be nil for backward compatibility.
+func (e *Engine) EnhanceWithRemote(localScore Score, toolName, argsJSON, subjectID, serverName string, ctx *EventContext) Score {
 	if e.remote == nil {
 		return localScore
 	}
-	return e.remote.EnhanceScore(localScore, toolName, argsJSON, subjectID, serverName)
+	return e.remote.EnhanceScore(localScore, toolName, argsJSON, subjectID, serverName, ctx)
 }
 
 // Evaluate determines the action based on a risk score.
