@@ -21,7 +21,9 @@ func (d *DB) GetAll() ([]Entry, error) {
 	rows, err := d.db.Query(
 		`SELECT id, timestamp, server_name, direction, method, message_id, tool_name,
 		        arguments_json, response_json, verdict, risk_score, risk_level,
-		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name
+		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name,
+		        scoring_source, local_score, remote_score, gnn_score, confidence,
+		        compliance_refs, behavioral_flags, score_decomposition, mitigations
 		 FROM audit_log ORDER BY id ASC`,
 	)
 	if err != nil {
@@ -35,7 +37,9 @@ func (d *DB) GetAll() ([]Entry, error) {
 		if err := rows.Scan(&e.ID, &e.Timestamp, &e.ServerName, &e.Direction, &e.Method,
 			&e.MessageID, &e.ToolName, &e.ArgumentsJSON, &e.ResponseJSON, &e.Verdict,
 			&e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce,
-			&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName); err != nil {
+			&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName,
+			&e.ScoringSource, &e.LocalScore, &e.RemoteScore, &e.GNNScore, &e.Confidence,
+			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
@@ -48,7 +52,9 @@ func (d *DB) GetLast(n int) ([]Entry, error) {
 	rows, err := d.db.Query(
 		`SELECT id, timestamp, server_name, direction, method, message_id, tool_name,
 		        arguments_json, response_json, verdict, risk_score, risk_level,
-		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name
+		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name,
+		        scoring_source, local_score, remote_score, gnn_score, confidence,
+		        compliance_refs, behavioral_flags, score_decomposition, mitigations
 		 FROM audit_log ORDER BY id DESC LIMIT ?`, n,
 	)
 	if err != nil {
@@ -62,7 +68,9 @@ func (d *DB) GetLast(n int) ([]Entry, error) {
 		if err := rows.Scan(&e.ID, &e.Timestamp, &e.ServerName, &e.Direction, &e.Method,
 			&e.MessageID, &e.ToolName, &e.ArgumentsJSON, &e.ResponseJSON, &e.Verdict,
 			&e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce,
-			&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName); err != nil {
+			&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName,
+			&e.ScoringSource, &e.LocalScore, &e.RemoteScore, &e.GNNScore, &e.Confidence,
+			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
@@ -80,12 +88,16 @@ func (d *DB) GetByID(id int64) (*Entry, error) {
 	err := d.db.QueryRow(
 		`SELECT id, timestamp, server_name, direction, method, message_id, tool_name,
 		        arguments_json, response_json, verdict, risk_score, risk_level,
-		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name
+		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name,
+		        scoring_source, local_score, remote_score, gnn_score, confidence,
+		        compliance_refs, behavioral_flags, score_decomposition, mitigations
 		 FROM audit_log WHERE id = ?`, id,
 	).Scan(&e.ID, &e.Timestamp, &e.ServerName, &e.Direction, &e.Method,
 		&e.MessageID, &e.ToolName, &e.ArgumentsJSON, &e.ResponseJSON, &e.Verdict,
 		&e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce,
-		&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName)
+		&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName,
+			&e.ScoringSource, &e.LocalScore, &e.RemoteScore, &e.GNNScore, &e.Confidence,
+			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +116,9 @@ func (d *DB) GetAfterID(afterID int64, limit int) ([]Entry, error) {
 	rows, err := d.db.Query(
 		`SELECT id, timestamp, server_name, direction, method, message_id, tool_name,
 		        arguments_json, response_json, verdict, risk_score, risk_level,
-		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name
+		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name,
+		        scoring_source, local_score, remote_score, gnn_score, confidence,
+		        compliance_refs, behavioral_flags, score_decomposition, mitigations
 		 FROM audit_log WHERE id > ? ORDER BY id ASC LIMIT ?`, afterID, limit,
 	)
 	if err != nil {
@@ -118,7 +132,9 @@ func (d *DB) GetAfterID(afterID int64, limit int) ([]Entry, error) {
 		if err := rows.Scan(&e.ID, &e.Timestamp, &e.ServerName, &e.Direction, &e.Method,
 			&e.MessageID, &e.ToolName, &e.ArgumentsJSON, &e.ResponseJSON, &e.Verdict,
 			&e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce,
-			&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName); err != nil {
+			&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName,
+			&e.ScoringSource, &e.LocalScore, &e.RemoteScore, &e.GNNScore, &e.Confidence,
+			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
