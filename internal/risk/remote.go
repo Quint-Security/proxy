@@ -67,7 +67,7 @@ type eventRequest struct {
 	AgentID            string              `json:"agent_id,omitempty"`
 	Action             string              `json:"action"`
 	TargetResource     string              `json:"target_resource,omitempty"`
-	DataFieldsAccessed []string            `json:"data_fields_accessed,omitempty"`
+	DataFieldsAccessed []ClassifiedField   `json:"data_fields_accessed,omitempty"`
 	UserContext        string              `json:"user_context,omitempty"`
 	Metadata           map[string]any      `json:"metadata,omitempty"`
 	Timestamp          string              `json:"timestamp"`
@@ -157,6 +157,20 @@ func (r *RemoteScorer) EnhanceScore(localScore Score, toolName, argsJSON, subjec
 		req.Parameters = json.RawMessage(argsJSON)
 	} else {
 		req.Parameters = json.RawMessage("{}")
+	}
+
+	// Extract sensitive data fields and target from tool arguments
+	classifiedFields := ExtractFields(argsJSON)
+	if len(classifiedFields) > 0 {
+		req.DataFieldsAccessed = classifiedFields
+	}
+	target := ExtractTarget(serverName, toolName, argsJSON, classifiedFields)
+	if target != nil {
+		req.Target = &TargetInfoPayload{
+			ResourceType:     target.ResourceType,
+			ResourceID:       target.ResourceID,
+			SensitivityLevel: target.SensitivityLevel,
+		}
 	}
 
 	// Enrich from EventContext if provided
