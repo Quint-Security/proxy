@@ -55,6 +55,7 @@ type LogOpts struct {
 	BehavioralFlags    []string
 	ScoreDecomposition map[string]any
 	Mitigations        []string
+	CloudEventID       string
 }
 
 // Log creates a signed audit entry and inserts it atomically.
@@ -124,6 +125,7 @@ func (l *Logger) Log(opts LogOpts) {
 		}
 
 		scoringSource := strPtr(opts.ScoringSource)
+		cloudEventID := strPtr(opts.CloudEventID)
 
 		return Entry{
 			Timestamp:          timestamp,
@@ -153,6 +155,7 @@ func (l *Logger) Log(opts LogOpts) {
 			BehavioralFlags:    behavioralFlagsJSON,
 			ScoreDecomposition: scoreDecompJSON,
 			Mitigations:        mitigationsJSON,
+			CloudEventID:       cloudEventID,
 		}
 	})
 	if err != nil {

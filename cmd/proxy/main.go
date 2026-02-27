@@ -28,6 +28,7 @@ type riskResult struct {
 	gnnScore           *float64
 	confidence         *float64
 	mitigations        []string
+	cloudEventID       string
 }
 
 // Function type aliases used across phases.

@@ -307,6 +307,7 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 			logOpts.Confidence = enrichment.Confidence
 			logOpts.Mitigations = enrichment.Mitigations
 			logOpts.ScoringSource = enrichment.ScoringSource
+			logOpts.CloudEventID = enrichment.EventID
 			if logOpts.ScoringSource == "" {
 				logOpts.ScoringSource = "remote"
 			}

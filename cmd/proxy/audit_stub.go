@@ -69,6 +69,7 @@ func initAudit(dataDir string, policy intercept.PolicyConfig, logEntry *logEntry
 			opts.GNNScore = enrichment.gnnScore
 			opts.Confidence = enrichment.confidence
 			opts.Mitigations = enrichment.mitigations
+			opts.CloudEventID = enrichment.cloudEventID
 		}
 
 		logger.Log(opts)

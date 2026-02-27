@@ -128,6 +128,7 @@ type eventResponse struct {
 // RemoteEnrichment holds the extra fields from the remote scoring response
 // that should be persisted in the audit log.
 type RemoteEnrichment struct {
+	EventID            string         `json:"event_id,omitempty"`
 	ScoringSource      string         `json:"scoring_source,omitempty"`
 	ComplianceRefs     []string       `json:"compliance_refs,omitempty"`
 	BehavioralFlags    []string       `json:"behavioral_flags,omitempty"`
@@ -283,6 +284,7 @@ func (r *RemoteScorer) EnhanceScore(localScore Score, toolName, argsJSON, subjec
 
 	// Attach enrichment data for audit logging
 	enriched.RemoteEnrichment = &RemoteEnrichment{
+		EventID:            result.EventID,
 		ScoringSource:      result.ScoringSource,
 		ComplianceRefs:     result.ComplianceRefs,
 		BehavioralFlags:    result.BehavioralFlags,

@@ -77,6 +77,7 @@ func initRisk(dataDir string, policy intercept.PolicyConfig, scoreTool *scoreFun
 			result.gnnScore = s.RemoteEnrichment.GNNScore
 			result.confidence = s.RemoteEnrichment.Confidence
 			result.mitigations = s.RemoteEnrichment.Mitigations
+			result.cloudEventID = s.RemoteEnrichment.EventID
 		} else {
 			result.scoringSource = "local"
 		}

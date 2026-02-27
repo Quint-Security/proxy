@@ -23,7 +23,7 @@ func (d *DB) GetAll() ([]Entry, error) {
 		        arguments_json, response_json, verdict, risk_score, risk_level,
 		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name,
 		        scoring_source, local_score, remote_score, gnn_score, confidence,
-		        compliance_refs, behavioral_flags, score_decomposition, mitigations
+		        compliance_refs, behavioral_flags, score_decomposition, mitigations, cloud_event_id
 		 FROM audit_log ORDER BY id ASC`,
 	)
 	if err != nil {
@@ -39,7 +39,7 @@ func (d *DB) GetAll() ([]Entry, error) {
 			&e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce,
 			&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName,
 			&e.ScoringSource, &e.LocalScore, &e.RemoteScore, &e.GNNScore, &e.Confidence,
-			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations); err != nil {
+			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations, &e.CloudEventID); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
@@ -54,7 +54,7 @@ func (d *DB) GetLast(n int) ([]Entry, error) {
 		        arguments_json, response_json, verdict, risk_score, risk_level,
 		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name,
 		        scoring_source, local_score, remote_score, gnn_score, confidence,
-		        compliance_refs, behavioral_flags, score_decomposition, mitigations
+		        compliance_refs, behavioral_flags, score_decomposition, mitigations, cloud_event_id
 		 FROM audit_log ORDER BY id DESC LIMIT ?`, n,
 	)
 	if err != nil {
@@ -70,7 +70,7 @@ func (d *DB) GetLast(n int) ([]Entry, error) {
 			&e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce,
 			&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName,
 			&e.ScoringSource, &e.LocalScore, &e.RemoteScore, &e.GNNScore, &e.Confidence,
-			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations); err != nil {
+			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations, &e.CloudEventID); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
@@ -90,14 +90,14 @@ func (d *DB) GetByID(id int64) (*Entry, error) {
 		        arguments_json, response_json, verdict, risk_score, risk_level,
 		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name,
 		        scoring_source, local_score, remote_score, gnn_score, confidence,
-		        compliance_refs, behavioral_flags, score_decomposition, mitigations
+		        compliance_refs, behavioral_flags, score_decomposition, mitigations, cloud_event_id
 		 FROM audit_log WHERE id = ?`, id,
 	).Scan(&e.ID, &e.Timestamp, &e.ServerName, &e.Direction, &e.Method,
 		&e.MessageID, &e.ToolName, &e.ArgumentsJSON, &e.ResponseJSON, &e.Verdict,
 		&e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce,
 		&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName,
 			&e.ScoringSource, &e.LocalScore, &e.RemoteScore, &e.GNNScore, &e.Confidence,
-			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations)
+			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations, &e.CloudEventID)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +118,7 @@ func (d *DB) GetAfterID(afterID int64, limit int) ([]Entry, error) {
 		        arguments_json, response_json, verdict, risk_score, risk_level,
 		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name,
 		        scoring_source, local_score, remote_score, gnn_score, confidence,
-		        compliance_refs, behavioral_flags, score_decomposition, mitigations
+		        compliance_refs, behavioral_flags, score_decomposition, mitigations, cloud_event_id
 		 FROM audit_log WHERE id > ? ORDER BY id ASC LIMIT ?`, afterID, limit,
 	)
 	if err != nil {
@@ -134,7 +134,7 @@ func (d *DB) GetAfterID(afterID int64, limit int) ([]Entry, error) {
 			&e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce,
 			&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName,
 			&e.ScoringSource, &e.LocalScore, &e.RemoteScore, &e.GNNScore, &e.Confidence,
-			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations); err != nil {
+			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations, &e.CloudEventID); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)

@@ -58,6 +58,7 @@ var migrations = []string{
 	`ALTER TABLE audit_log ADD COLUMN behavioral_flags TEXT`,
 	`ALTER TABLE audit_log ADD COLUMN score_decomposition TEXT`,
 	`ALTER TABLE audit_log ADD COLUMN mitigations TEXT`,
+	`ALTER TABLE audit_log ADD COLUMN cloud_event_id TEXT`,
 }
 
 const (
@@ -95,6 +96,7 @@ type Entry struct {
 	BehavioralFlags    *string
 	ScoreDecomposition *string
 	Mitigations        *string
+	CloudEventID       *string
 }
 
 // DB wraps the SQLite audit database.
@@ -180,8 +182,8 @@ func (d *DB) tryInsertAtomic(buildEntry func(prevSignature string) Entry) (int64
 			 arguments_json, response_json, verdict, risk_score, risk_level,
 			 policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name,
 			 scoring_source, local_score, remote_score, gnn_score, confidence,
-			 compliance_refs, behavioral_flags, score_decomposition, mitigations)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 compliance_refs, behavioral_flags, score_decomposition, mitigations, cloud_event_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.Timestamp, entry.ServerName, entry.Direction, entry.Method,
 		entry.MessageID, entry.ToolName, entry.ArgumentsJSON, entry.ResponseJSON,
 		entry.Verdict, entry.RiskScore, entry.RiskLevel,
@@ -189,6 +191,7 @@ func (d *DB) tryInsertAtomic(buildEntry func(prevSignature string) Entry) (int64
 		entry.AgentID, entry.AgentName,
 		entry.ScoringSource, entry.LocalScore, entry.RemoteScore, entry.GNNScore, entry.Confidence,
 		entry.ComplianceRefs, entry.BehavioralFlags, entry.ScoreDecomposition, entry.Mitigations,
+		entry.CloudEventID,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert audit entry: %w", err)
@@ -251,7 +254,7 @@ func (d *DB) Query(opts QueryOpts) ([]Entry, int, error) {
 		limit = 50
 	}
 	query := fmt.Sprintf(
-		"SELECT id, timestamp, server_name, direction, method, message_id, tool_name, arguments_json, response_json, verdict, risk_score, risk_level, policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name, scoring_source, local_score, remote_score, gnn_score, confidence, compliance_refs, behavioral_flags, score_decomposition, mitigations FROM audit_log WHERE %s ORDER BY id DESC LIMIT ? OFFSET ?",
+		"SELECT id, timestamp, server_name, direction, method, message_id, tool_name, arguments_json, response_json, verdict, risk_score, risk_level, policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name, scoring_source, local_score, remote_score, gnn_score, confidence, compliance_refs, behavioral_flags, score_decomposition, mitigations, cloud_event_id FROM audit_log WHERE %s ORDER BY id DESC LIMIT ? OFFSET ?",
 		where,
 	)
 	args = append(args, limit, opts.Offset)
@@ -265,7 +268,7 @@ func (d *DB) Query(opts QueryOpts) ([]Entry, int, error) {
 	var entries []Entry
 	for rows.Next() {
 		var e Entry
-		if err := rows.Scan(&e.ID, &e.Timestamp, &e.ServerName, &e.Direction, &e.Method, &e.MessageID, &e.ToolName, &e.ArgumentsJSON, &e.ResponseJSON, &e.Verdict, &e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce, &e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName, &e.ScoringSource, &e.LocalScore, &e.RemoteScore, &e.GNNScore, &e.Confidence, &e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations); err != nil {
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.ServerName, &e.Direction, &e.Method, &e.MessageID, &e.ToolName, &e.ArgumentsJSON, &e.ResponseJSON, &e.Verdict, &e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce, &e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName, &e.ScoringSource, &e.LocalScore, &e.RemoteScore, &e.GNNScore, &e.Confidence, &e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations, &e.CloudEventID); err != nil {
 			return nil, 0, err
 		}
 		entries = append(entries, e)
@@ -336,7 +339,7 @@ func (d *DB) GetRange(opts RangeOpts) ([]Entry, error) {
 		        arguments_json, response_json, verdict, risk_score, risk_level,
 		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name,
 		        scoring_source, local_score, remote_score, gnn_score, confidence,
-		        compliance_refs, behavioral_flags, score_decomposition, mitigations
+		        compliance_refs, behavioral_flags, score_decomposition, mitigations, cloud_event_id
 		 FROM audit_log WHERE %s ORDER BY id ASC`, where,
 	)
 
@@ -354,7 +357,7 @@ func (d *DB) GetRange(opts RangeOpts) ([]Entry, error) {
 			&e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce,
 			&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName,
 			&e.ScoringSource, &e.LocalScore, &e.RemoteScore, &e.GNNScore, &e.Confidence,
-			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations); err != nil {
+			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations, &e.CloudEventID); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
