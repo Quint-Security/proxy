@@ -141,14 +141,42 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	pending, _ := s.approvalDB.ListPending()
 
-	s.json(w, 200, map[string]any{
-		"audit":            stats,
-		"agents_total":     len(agents),
-		"agents_active":    activeAgents,
+	response := map[string]any{
+		"audit":             stats,
+		"agents_total":      len(agents),
+		"agents_active":     activeAgents,
 		"approvals_pending": len(pending),
-		"policy_version":   s.policy.Version,
-		"data_dir":         s.dataDir,
-	})
+		"policy_version":    s.policy.Version,
+		"data_dir":          s.dataDir,
+	}
+
+	// Add remote scoring health info if configured
+	if s.policy.Risk != nil && s.policy.Risk.RemoteAPI != nil {
+		remoteInfo := map[string]any{
+			"configured": s.policy.Risk.RemoteAPI.Enabled,
+			"url":        s.policy.Risk.RemoteAPI.URL,
+		}
+
+		// Check if we have any audit entries with remote scoring
+		entries, _, _ := s.auditDB.Query(audit.QueryOpts{Limit: 1})
+		if len(entries) > 0 && entries[0].ScoringSource != nil && *entries[0].ScoringSource == "remote" {
+			remoteInfo["last_response"] = entries[0].Timestamp
+			remoteInfo["status"] = "healthy"
+		} else if s.policy.Risk.RemoteAPI.Enabled {
+			remoteInfo["status"] = "no_recent_activity"
+		} else {
+			remoteInfo["status"] = "disabled"
+		}
+
+		response["remote_scoring"] = remoteInfo
+	} else {
+		response["remote_scoring"] = map[string]any{
+			"configured": false,
+			"status":     "not_configured",
+		}
+	}
+
+	s.json(w, 200, response)
 }
 
 func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {

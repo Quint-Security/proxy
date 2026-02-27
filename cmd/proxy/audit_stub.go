@@ -40,8 +40,8 @@ func initAudit(dataDir string, policy intercept.PolicyConfig, logEntry *logEntry
 		agentName = agentIdentity.AgentName
 	}
 
-	*logEntry = func(serverName, direction, method, messageID, toolName, argsJSON, respJSON string, verdict string, riskScore *int, riskLevel *string) {
-		logger.Log(audit.LogOpts{
+	*logEntry = func(serverName, direction, method, messageID, toolName, argsJSON, respJSON string, verdict string, riskScore *int, riskLevel *string, enrichment *riskResult) {
+		opts := audit.LogOpts{
 			ServerName:    serverName,
 			Direction:     direction,
 			Method:        method,
@@ -54,6 +54,23 @@ func initAudit(dataDir string, policy intercept.PolicyConfig, logEntry *logEntry
 			RiskLevel:     riskLevel,
 			AgentID:       agentID,
 			AgentName:     agentName,
-		})
+		}
+
+		// Add enrichment data if available
+		if enrichment != nil {
+			opts.ScoringSource = enrichment.scoringSource
+			opts.LocalScore = &enrichment.localScore
+			if enrichment.scoringSource == "remote" {
+				opts.RemoteScore = riskScore
+			}
+			opts.ComplianceRefs = enrichment.complianceRefs
+			opts.BehavioralFlags = enrichment.behavioralFlags
+			opts.ScoreDecomposition = enrichment.scoreDecomposition
+			opts.GNNScore = enrichment.gnnScore
+			opts.Confidence = enrichment.confidence
+			opts.Mitigations = enrichment.mitigations
+		}
+
+		logger.Log(opts)
 	}
 }

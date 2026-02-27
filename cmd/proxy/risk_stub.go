@@ -62,7 +62,26 @@ func initRisk(dataDir string, policy intercept.PolicyConfig, scoreTool *scoreFun
 
 		s = engine.EnhanceWithRemote(s, toolName, argsJSON, subjectID, serverName, eventCtx)
 
-		return &riskResult{score: s.Value, level: s.Level}
+		result := &riskResult{
+			score:      s.Value,
+			level:      s.Level,
+			localScore: s.BaseScore,
+		}
+
+		// Populate enrichment data if available
+		if s.RemoteEnrichment != nil {
+			result.scoringSource = "remote"
+			result.complianceRefs = s.RemoteEnrichment.ComplianceRefs
+			result.behavioralFlags = s.RemoteEnrichment.BehavioralFlags
+			result.scoreDecomposition = s.RemoteEnrichment.ScoreDecomposition
+			result.gnnScore = s.RemoteEnrichment.GNNScore
+			result.confidence = s.RemoteEnrichment.Confidence
+			result.mitigations = s.RemoteEnrichment.Mitigations
+		} else {
+			result.scoringSource = "local"
+		}
+
+		return result
 	}
 
 	*evalRisk = func(score int) string {

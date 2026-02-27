@@ -48,6 +48,15 @@ var migrations = []string{
 	`ALTER TABLE audit_log ADD COLUMN risk_level TEXT`,
 	`ALTER TABLE audit_log ADD COLUMN agent_id TEXT`,
 	`ALTER TABLE audit_log ADD COLUMN agent_name TEXT`,
+	`ALTER TABLE audit_log ADD COLUMN scoring_source TEXT`,
+	`ALTER TABLE audit_log ADD COLUMN local_score INTEGER`,
+	`ALTER TABLE audit_log ADD COLUMN remote_score INTEGER`,
+	`ALTER TABLE audit_log ADD COLUMN gnn_score REAL`,
+	`ALTER TABLE audit_log ADD COLUMN confidence REAL`,
+	`ALTER TABLE audit_log ADD COLUMN compliance_refs TEXT`,
+	`ALTER TABLE audit_log ADD COLUMN behavioral_flags TEXT`,
+	`ALTER TABLE audit_log ADD COLUMN score_decomposition TEXT`,
+	`ALTER TABLE audit_log ADD COLUMN mitigations TEXT`,
 }
 
 const (
@@ -57,25 +66,34 @@ const (
 
 // Entry represents a single audit log row.
 type Entry struct {
-	ID            int64
-	Timestamp     string
-	ServerName    string
-	Direction     string
-	Method        string
-	MessageID     *string
-	ToolName      *string
-	ArgumentsJSON *string
-	ResponseJSON  *string
-	Verdict       string
-	RiskScore     *int
-	RiskLevel     *string
-	PolicyHash    string
-	PrevHash      string
-	Nonce         string
-	Signature     string
-	PublicKey     string
-	AgentID       *string
-	AgentName     *string
+	ID                 int64
+	Timestamp          string
+	ServerName         string
+	Direction          string
+	Method             string
+	MessageID          *string
+	ToolName           *string
+	ArgumentsJSON      *string
+	ResponseJSON       *string
+	Verdict            string
+	RiskScore          *int
+	RiskLevel          *string
+	PolicyHash         string
+	PrevHash           string
+	Nonce              string
+	Signature          string
+	PublicKey          string
+	AgentID            *string
+	AgentName          *string
+	ScoringSource      *string
+	LocalScore         *int
+	RemoteScore        *int
+	GNNScore           *float64
+	Confidence         *float64
+	ComplianceRefs     *string
+	BehavioralFlags    *string
+	ScoreDecomposition *string
+	Mitigations        *string
 }
 
 // DB wraps the SQLite audit database.
@@ -159,13 +177,17 @@ func (d *DB) tryInsertAtomic(buildEntry func(prevSignature string) Entry) (int64
 		INSERT INTO audit_log
 			(timestamp, server_name, direction, method, message_id, tool_name,
 			 arguments_json, response_json, verdict, risk_score, risk_level,
-			 policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name,
+			 scoring_source, local_score, remote_score, gnn_score, confidence,
+			 compliance_refs, behavioral_flags, score_decomposition, mitigations)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.Timestamp, entry.ServerName, entry.Direction, entry.Method,
 		entry.MessageID, entry.ToolName, entry.ArgumentsJSON, entry.ResponseJSON,
 		entry.Verdict, entry.RiskScore, entry.RiskLevel,
 		entry.PolicyHash, entry.PrevHash, entry.Nonce, entry.Signature, entry.PublicKey,
 		entry.AgentID, entry.AgentName,
+		entry.ScoringSource, entry.LocalScore, entry.RemoteScore, entry.GNNScore, entry.Confidence,
+		entry.ComplianceRefs, entry.BehavioralFlags, entry.ScoreDecomposition, entry.Mitigations,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert audit entry: %w", err)
@@ -228,7 +250,7 @@ func (d *DB) Query(opts QueryOpts) ([]Entry, int, error) {
 		limit = 50
 	}
 	query := fmt.Sprintf(
-		"SELECT id, timestamp, server_name, direction, method, message_id, tool_name, arguments_json, response_json, verdict, risk_score, risk_level, policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name FROM audit_log WHERE %s ORDER BY id DESC LIMIT ? OFFSET ?",
+		"SELECT id, timestamp, server_name, direction, method, message_id, tool_name, arguments_json, response_json, verdict, risk_score, risk_level, policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name, scoring_source, local_score, remote_score, gnn_score, confidence, compliance_refs, behavioral_flags, score_decomposition, mitigations FROM audit_log WHERE %s ORDER BY id DESC LIMIT ? OFFSET ?",
 		where,
 	)
 	args = append(args, limit, opts.Offset)
@@ -242,7 +264,7 @@ func (d *DB) Query(opts QueryOpts) ([]Entry, int, error) {
 	var entries []Entry
 	for rows.Next() {
 		var e Entry
-		if err := rows.Scan(&e.ID, &e.Timestamp, &e.ServerName, &e.Direction, &e.Method, &e.MessageID, &e.ToolName, &e.ArgumentsJSON, &e.ResponseJSON, &e.Verdict, &e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce, &e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName); err != nil {
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.ServerName, &e.Direction, &e.Method, &e.MessageID, &e.ToolName, &e.ArgumentsJSON, &e.ResponseJSON, &e.Verdict, &e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce, &e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName, &e.ScoringSource, &e.LocalScore, &e.RemoteScore, &e.GNNScore, &e.Confidence, &e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations); err != nil {
 			return nil, 0, err
 		}
 		entries = append(entries, e)
@@ -311,7 +333,9 @@ func (d *DB) GetRange(opts RangeOpts) ([]Entry, error) {
 	query := fmt.Sprintf(
 		`SELECT id, timestamp, server_name, direction, method, message_id, tool_name,
 		        arguments_json, response_json, verdict, risk_score, risk_level,
-		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name
+		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name,
+		        scoring_source, local_score, remote_score, gnn_score, confidence,
+		        compliance_refs, behavioral_flags, score_decomposition, mitigations
 		 FROM audit_log WHERE %s ORDER BY id ASC`, where,
 	)
 
@@ -327,7 +351,9 @@ func (d *DB) GetRange(opts RangeOpts) ([]Entry, error) {
 		if err := rows.Scan(&e.ID, &e.Timestamp, &e.ServerName, &e.Direction, &e.Method,
 			&e.MessageID, &e.ToolName, &e.ArgumentsJSON, &e.ResponseJSON, &e.Verdict,
 			&e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce,
-			&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName); err != nil {
+			&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName,
+			&e.ScoringSource, &e.LocalScore, &e.RemoteScore, &e.GNNScore, &e.Confidence,
+			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)

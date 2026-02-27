@@ -18,12 +18,20 @@ var version = "dev"
 
 // riskResult holds risk scoring output.
 type riskResult struct {
-	score int
-	level string
+	score              int
+	level              string
+	scoringSource      string
+	localScore         int
+	complianceRefs     []string
+	behavioralFlags    []string
+	scoreDecomposition map[string]any
+	gnnScore           *float64
+	confidence         *float64
+	mitigations        []string
 }
 
 // Function type aliases used across phases.
-type logEntryFunc func(serverName, direction, method, messageID, toolName, argsJSON, respJSON string, verdict string, riskScore *int, riskLevel *string)
+type logEntryFunc func(serverName, direction, method, messageID, toolName, argsJSON, respJSON string, verdict string, riskScore *int, riskLevel *string, enrichment *riskResult)
 type scoreFunc func(toolName, argsJSON, subjectID, serverName string) *riskResult
 type evalFunc func(score int) string
 type revokeFunc func(subjectID string) bool
@@ -172,7 +180,7 @@ func main() {
 	}
 
 	// Initialize with stubs — phases replace these
-	var logEntry logEntryFunc = func(_, _, _, _, _, _, _ string, _ string, _ *int, _ *string) {}
+	var logEntry logEntryFunc = func(_, _, _, _, _, _, _ string, _ string, _ *int, _ *string, _ *riskResult) {}
 	var scoreTool scoreFunc = func(_, _, _, _ string) *riskResult { return nil }
 	var evalRisk evalFunc = func(_ int) string { return "allow" }
 	var revoke revokeFunc = func(_ string) bool { return false }
@@ -244,12 +252,12 @@ func handleParentMessage(
 	}
 
 	if result.ToolName == "" || result.Verdict == intercept.VerdictDeny {
-		logEntry(serverName, "request", result.Method, result.MessageID, result.ToolName, result.ArgumentsJson, "", string(result.Verdict), nil, nil)
+		logEntry(serverName, "request", result.Method, result.MessageID, result.ToolName, result.ArgumentsJson, "", string(result.Verdict), nil, nil, nil)
 
 		if result.Verdict == intercept.VerdictDeny {
 			denyResp := intercept.BuildDenyResponse(result.RawID)
 			qlog.Info("denied %s on %s", result.ToolName, serverName)
-			logEntry(serverName, "response", result.Method, result.MessageID, result.ToolName, "", denyResp, string(intercept.VerdictDeny), nil, nil)
+			logEntry(serverName, "response", result.Method, result.MessageID, result.ToolName, "", denyResp, string(intercept.VerdictDeny), nil, nil, nil)
 			os.Stdout.WriteString(denyResp + "\n")
 			return ""
 		}
@@ -262,8 +270,8 @@ func handleParentMessage(
 	if requiredScope, ok := auth.EnforceScope(identity, result.ToolName); !ok {
 		denyResp := intercept.BuildScopeDenyResponse(result.RawID, result.ToolName, requiredScope)
 		qlog.Info("scope-denied %s for agent %s (requires %s)", result.ToolName, identity.AgentName, requiredScope)
-		logEntry(serverName, "request", result.Method, result.MessageID, result.ToolName, result.ArgumentsJson, "", "scope_denied", nil, nil)
-		logEntry(serverName, "response", result.Method, result.MessageID, result.ToolName, "", denyResp, "scope_denied", nil, nil)
+		logEntry(serverName, "request", result.Method, result.MessageID, result.ToolName, result.ArgumentsJson, "", "scope_denied", nil, nil, nil)
+		logEntry(serverName, "response", result.Method, result.MessageID, result.ToolName, "", denyResp, "scope_denied", nil, nil, nil)
 		os.Stdout.WriteString(denyResp + "\n")
 		return ""
 	}
@@ -283,14 +291,14 @@ func handleParentMessage(
 		riskLevel = &risk.level
 	}
 
-	logEntry(serverName, "request", result.Method, result.MessageID, result.ToolName, result.ArgumentsJson, "", string(result.Verdict), riskScore, riskLevel)
+	logEntry(serverName, "request", result.Method, result.MessageID, result.ToolName, result.ArgumentsJson, "", string(result.Verdict), riskScore, riskLevel, risk)
 
 	if risk != nil {
 		action := evalRisk(risk.score)
 		if action == "deny" {
 			denyResp := intercept.BuildDenyResponse(result.RawID)
 			qlog.Warn("risk-denied %s (score=%d, level=%s)", result.ToolName, risk.score, risk.level)
-			logEntry(serverName, "response", result.Method, result.MessageID, result.ToolName, "", denyResp, string(intercept.VerdictDeny), riskScore, riskLevel)
+			logEntry(serverName, "response", result.Method, result.MessageID, result.ToolName, "", denyResp, string(intercept.VerdictDeny), riskScore, riskLevel, risk)
 			os.Stdout.WriteString(denyResp + "\n")
 			return ""
 		}
@@ -300,7 +308,7 @@ func handleParentMessage(
 			if failMode == "closed" {
 				denyResp := intercept.BuildDenyResponse(result.RawID)
 				qlog.Warn("flag-denied %s in stdio mode (fail_mode=closed)", result.ToolName)
-				logEntry(serverName, "response", result.Method, result.MessageID, result.ToolName, "", denyResp, "flag_denied", riskScore, riskLevel)
+				logEntry(serverName, "response", result.Method, result.MessageID, result.ToolName, "", denyResp, "flag_denied", riskScore, riskLevel, risk)
 				os.Stdout.WriteString(denyResp + "\n")
 				return ""
 			}
@@ -328,7 +336,7 @@ func handleChildMessage(line string, serverName string, logEntry logEntryFunc, _
 	}()
 
 	method, msgID, respJSON := intercept.InspectResponse(line)
-	logEntry(serverName, "response", method, msgID, "", "", respJSON, string(intercept.VerdictPassthrough), nil, nil)
+	logEntry(serverName, "response", method, msgID, "", "", respJSON, string(intercept.VerdictPassthrough), nil, nil, nil)
 	return line
 }
 
