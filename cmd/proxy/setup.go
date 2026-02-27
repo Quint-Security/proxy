@@ -44,15 +44,16 @@ func runSetup(args []string) {
 		store.Close()
 	}
 
-	// Offer providers that have built-in OAuth credentials
+	// Offer providers for connection
 	offered := 0
 	for _, name := range []string{"github", "notion", "sentry", "slack"} {
 		p := connect.Providers[name]
-		if p.ClientID == "" && p.ClientSecret == "" {
-			continue
-		}
 		if connected[name] {
 			fmt.Printf("  %s — already connected\n", p.Name)
+			continue
+		}
+		// Skip providers without OAuth config (secrets moved server-side)
+		if p.ClientID == "" && p.ClientSecret == "" {
 			continue
 		}
 		offered++
@@ -69,8 +70,10 @@ func runSetup(args []string) {
 	}
 	fmt.Println()
 
-	// Step 2.5: Suggest MCP servers for connected providers that aren't configured
-	// Re-read connected providers (may have changed after connect step)
+	// Step 2.5: Reconcile connected providers with gateway servers.json
+	// Always runs — ensures every connected provider has a matching MCP server.
+	// Also checks existing servers.json for credential references to detect providers
+	// that were connected outside the setup flow.
 	store2, dataDir := openCredStore("")
 	if store2 != nil {
 		connected = make(map[string]bool)
@@ -86,8 +89,16 @@ func runSetup(args []string) {
 		gatewayCfg, _ := gateway.LoadConfig(dataDir)
 		existingServers := map[string]bool{}
 		if gatewayCfg != nil {
-			for name := range gatewayCfg.Servers {
+			for name, srv := range gatewayCfg.Servers {
 				existingServers[name] = true
+				// Also detect providers from credential placeholders in existing servers
+				// e.g. "__CREDENTIAL:notion__" means notion is connected
+				for _, v := range srv.Env {
+					if strings.HasPrefix(v, "__CREDENTIAL:") && strings.HasSuffix(v, "__") {
+						provider := strings.TrimSuffix(strings.TrimPrefix(v, "__CREDENTIAL:"), "__")
+						connected[provider] = true
+					}
+				}
 			}
 		}
 
