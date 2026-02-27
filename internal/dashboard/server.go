@@ -652,41 +652,54 @@ type spaHandler struct {
 func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
-	// Strip trailing slash to prevent redirect loops from http.FileServer
-	// (e.g., /audit/ → /audit, but keep / as-is)
+	// Strip trailing slash to prevent redirect loops
 	if path != "/" && strings.HasSuffix(path, "/") {
 		path = strings.TrimSuffix(path, "/")
-		r.URL.Path = path
 	}
 
 	// Try exact path first (for static assets like /_next/*, .css, .js)
 	if f, err := h.fs.Open(path); err == nil {
 		stat, statErr := f.Stat()
-		f.Close()
-		// Only serve if it's a file, not a directory (directories cause redirect loops)
 		if statErr == nil && !stat.IsDir() {
-			http.FileServer(h.fs).ServeHTTP(w, r)
+			defer f.Close()
+			http.ServeContent(w, r, stat.Name(), stat.ModTime(), f.(io.ReadSeeker))
 			return
 		}
+		f.Close()
 	}
 
 	// Try path + .html (e.g., /audit → /audit.html)
 	if f, err := h.fs.Open(path + ".html"); err == nil {
+		stat, statErr := f.Stat()
+		if statErr == nil {
+			defer f.Close()
+			http.ServeContent(w, r, stat.Name(), stat.ModTime(), f.(io.ReadSeeker))
+			return
+		}
 		f.Close()
-		r.URL.Path = path + ".html"
-		http.FileServer(h.fs).ServeHTTP(w, r)
-		return
 	}
 
-	// Try path/index.html (e.g., /audit/ → /audit/index.html)
+	// Try path/index.html (e.g., /some/path/ → /some/path/index.html)
 	if f, err := h.fs.Open(path + "/index.html"); err == nil {
+		stat, statErr := f.Stat()
+		if statErr == nil {
+			defer f.Close()
+			http.ServeContent(w, r, stat.Name(), stat.ModTime(), f.(io.ReadSeeker))
+			return
+		}
 		f.Close()
-		r.URL.Path = path + "/index.html"
-		http.FileServer(h.fs).ServeHTTP(w, r)
-		return
 	}
 
 	// Fallback to index.html for client-side routing
-	r.URL.Path = "/index.html"
-	http.FileServer(h.fs).ServeHTTP(w, r)
+	if f, err := h.fs.Open("/index.html"); err == nil {
+		stat, statErr := f.Stat()
+		if statErr == nil {
+			defer f.Close()
+			http.ServeContent(w, r, stat.Name(), stat.ModTime(), f.(io.ReadSeeker))
+			return
+		}
+		f.Close()
+	}
+
+	http.NotFound(w, r)
 }
