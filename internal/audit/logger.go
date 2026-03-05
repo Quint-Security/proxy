@@ -56,6 +56,16 @@ type LogOpts struct {
 	ScoreDecomposition map[string]any
 	Mitigations        []string
 	CloudEventID       string
+	TraceID            string
+	AgentDepth         *int
+	ParentAgentID      string
+	SpawnDetected      string // JSON of spawn event if detected
+
+	// Cloud auth fields
+	TokenType    string // "agent", "subagent", "session", etc.
+	TokenJTI     string // JWT token ID
+	RBACDecision string // "allowed" or denial reason
+	CustomerID   string // customer ID from JWT
 }
 
 // Log creates a signed audit entry and inserts it atomically.
@@ -126,6 +136,9 @@ func (l *Logger) Log(opts LogOpts) {
 
 		scoringSource := strPtr(opts.ScoringSource)
 		cloudEventID := strPtr(opts.CloudEventID)
+		traceID := strPtr(opts.TraceID)
+		parentAgentID := strPtr(opts.ParentAgentID)
+		spawnDetected := strPtr(opts.SpawnDetected)
 
 		return Entry{
 			Timestamp:          timestamp,
@@ -156,10 +169,34 @@ func (l *Logger) Log(opts LogOpts) {
 			ScoreDecomposition: scoreDecompJSON,
 			Mitigations:        mitigationsJSON,
 			CloudEventID:       cloudEventID,
+			TraceID:            traceID,
+			AgentDepth:         opts.AgentDepth,
+			ParentAgentID:      parentAgentID,
+			SpawnDetected:      spawnDetected,
 		}
 	})
 	if err != nil {
 		qlog.Error("failed to insert audit entry: %v", err)
+	}
+}
+
+// RecordRelationship persists an agent relationship to the database.
+func (l *Logger) RecordRelationship(parentAgent, childAgent string, confidence float64, depth int, spawnType, signalType string) {
+	if l.db == nil {
+		return
+	}
+	if err := l.db.UpsertRelationship(parentAgent, childAgent, confidence, depth, spawnType, signalType, ""); err != nil {
+		qlog.Error("failed to upsert relationship: %v", err)
+	}
+}
+
+// RecordSpawnEvent persists a spawn event to the database.
+func (l *Logger) RecordSpawnEvent(timestamp, patternID, parentAgent, childHint, spawnType, toolName, serverName, argsRef string, confidence float64) {
+	if l.db == nil {
+		return
+	}
+	if err := l.db.InsertSpawnEvent(timestamp, patternID, parentAgent, childHint, spawnType, toolName, serverName, argsRef, confidence); err != nil {
+		qlog.Error("failed to insert spawn event: %v", err)
 	}
 }
 

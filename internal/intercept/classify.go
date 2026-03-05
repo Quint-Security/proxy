@@ -91,6 +91,86 @@ func inferVerb(toolName string) string {
 	return "invoke"
 }
 
+// ClassifyHTTPAction converts an HTTP request to canonical action format.
+// Format: http:{domain}:{method}.{path_slug}
+// Examples:
+//
+//	GET  api.github.com/repos/foo/bar     -> http:api.github.com:get.repos
+//	POST api.openai.com/v1/completions    -> http:api.openai.com:post.completions
+//	CONNECT pastebin.com:443              -> http:pastebin.com:connect.tunnel
+func ClassifyHTTPAction(method, host, path string) string {
+	domain := sanitizeSegment(StripPort(host))
+	verb := strings.ToLower(method)
+	slug := inferPathSlug(path)
+	return fmt.Sprintf("http:%s:%s.%s", domain, verb, slug)
+}
+
+// StripPort removes the port suffix from a host string.
+// "api.github.com:443" -> "api.github.com"
+func StripPort(host string) string {
+	if i := strings.LastIndex(host, ":"); i >= 0 {
+		// Make sure it's a port, not part of an IPv6 address
+		if strings.Contains(host, "]") {
+			// IPv6: [::1]:443
+			if j := strings.LastIndex(host, "]"); j < i {
+				return host[:i]
+			}
+			return host
+		}
+		return host[:i]
+	}
+	return host
+}
+
+// inferPathSlug extracts a meaningful slug from a URL path.
+// "/v1/chat/completions" -> "completions"
+// "/repos/owner/name/pulls" -> "pulls"
+// "/" or "" -> "root"
+func inferPathSlug(path string) string {
+	if path == "" || path == "/" {
+		return "root"
+	}
+
+	// Strip query string
+	if i := strings.Index(path, "?"); i >= 0 {
+		path = path[:i]
+	}
+
+	// Split and work backwards to find a meaningful segment
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+
+	// Filter out version prefixes and UUIDs/numeric IDs
+	var meaningful []string
+	for _, p := range parts {
+		lower := strings.ToLower(p)
+		// Skip version prefixes
+		if len(lower) >= 2 && lower[0] == 'v' && lower[1] >= '0' && lower[1] <= '9' {
+			continue
+		}
+		// Skip purely numeric segments (IDs)
+		allDigits := true
+		for _, c := range lower {
+			if c < '0' || c > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits && len(lower) > 0 {
+			continue
+		}
+		if lower != "" {
+			meaningful = append(meaningful, lower)
+		}
+	}
+
+	if len(meaningful) == 0 {
+		return "root"
+	}
+
+	// Take the last meaningful segment
+	return sanitizeSegment(meaningful[len(meaningful)-1])
+}
+
 // sanitizeSegment replaces characters that would break the taxonomy format.
 // The risk API requires segments to match [a-z0-9_.]+ (no hyphens, colons, etc).
 func sanitizeSegment(s string) string {

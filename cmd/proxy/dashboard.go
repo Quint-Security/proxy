@@ -14,11 +14,12 @@ import (
 	qlog "github.com/Quint-Security/quint-proxy/internal/log"
 )
 
-// runDashboard handles: quint-proxy dashboard [--port <port>] [--no-open]
+// runDashboard handles: quint-proxy dashboard [--port <port>] [--static-dir <path>] [--no-open]
 func runDashboard(args []string) {
 	var policyPath string
 	var port int
 	var noOpen bool
+	var staticDir string
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -31,6 +32,11 @@ func runDashboard(args []string) {
 			i++
 			if i < len(args) {
 				policyPath = args[i]
+			}
+		case "--static-dir":
+			i++
+			if i < len(args) {
+				staticDir = args[i]
 			}
 		case "--no-open":
 			noOpen = true
@@ -49,7 +55,11 @@ func runDashboard(args []string) {
 	qlog.SetLevel(policy.LogLevel)
 	dataDir := intercept.ResolveDataDir(policy.DataDir)
 
-	srv, err := dashboard.New(dataDir, policy)
+	srv, err := dashboard.NewWithOpts(dashboard.Opts{
+		DataDir:   dataDir,
+		Policy:    policy,
+		StaticDir: staticDir,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to start dashboard: %v\n", err)
 		os.Exit(1)

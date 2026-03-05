@@ -42,6 +42,7 @@ type Engine struct {
 	customKeywords  []ArgKeyword
 	disableBuiltins bool
 	remote          *RemoteScorer
+	includeHTTP     bool
 }
 
 // EngineOpts configures the risk engine.
@@ -52,6 +53,7 @@ type EngineOpts struct {
 	DisableBuiltins bool
 	BehaviorDB      *BehaviorDB
 	Remote          *RemoteScorer
+	IncludeHTTP     bool // include DefaultHTTPRisks patterns
 }
 
 // NewEngine creates a new risk scoring engine.
@@ -66,12 +68,14 @@ func NewEngine(opts *EngineOpts) *Engine {
 	var ck []ArgKeyword
 	var disableBuiltins bool
 	var remote *RemoteScorer
+	var includeHTTP bool
 	if opts != nil {
 		db = opts.BehaviorDB
 		cp = opts.CustomPatterns
 		ck = opts.CustomKeywords
 		disableBuiltins = opts.DisableBuiltins
 		remote = opts.Remote
+		includeHTTP = opts.IncludeHTTP
 	}
 
 	return &Engine{
@@ -81,6 +85,7 @@ func NewEngine(opts *EngineOpts) *Engine {
 		customKeywords:  ck,
 		disableBuiltins: disableBuiltins,
 		remote:          remote,
+		includeHTTP:     includeHTTP,
 	}
 }
 
@@ -139,6 +144,31 @@ func NewEngineFromPolicy(riskCfg *intercept.RiskConfig, behaviorDB *BehaviorDB) 
 	return NewEngine(opts)
 }
 
+// SetIncludeHTTP enables or disables HTTP risk patterns.
+func (e *Engine) SetIncludeHTTP(v bool) {
+	e.includeHTTP = v
+}
+
+// DepthPenalty computes additional risk score based on agent tree depth.
+// Deeper agents are inherently riskier: each level adds 5 points (capped at 25).
+func DepthPenalty(depth int) int {
+	penalty := depth * 5
+	if penalty > 25 {
+		penalty = 25
+	}
+	return penalty
+}
+
+// DelegationBurstPenalty adds risk score when delegation bursts are detected.
+// A burst of rapid actions suggests automated child agents operating without human oversight.
+func DelegationBurstPenalty(burstCount int) int {
+	if burstCount < BurstThreshold {
+		return 0
+	}
+	// 10 base + 2 per action above threshold
+	return 10 + (burstCount-BurstThreshold)*2
+}
+
 // ScoreToolCall evaluates the risk of a tool call.
 func (e *Engine) ScoreToolCall(toolName, argsJSON, subjectID string) Score {
 	reasons := make([]string, 0, 4)
@@ -149,6 +179,9 @@ func (e *Engine) ScoreToolCall(toolName, argsJSON, subjectID string) Score {
 	allPatterns = append(allPatterns, e.customPatterns...)
 	if !e.disableBuiltins {
 		allPatterns = append(allPatterns, DefaultToolRisks...)
+	}
+	if e.includeHTTP {
+		allPatterns = append(allPatterns, DefaultHTTPRisks...)
 	}
 
 	matched := false
@@ -222,6 +255,52 @@ func (e *Engine) ScoreToolCall(toolName, argsJSON, subjectID string) Score {
 		Level:         level,
 		Reasons:       reasons,
 	}
+}
+
+// ScoreWithContext evaluates risk with agent tree context (depth, burst, parent inheritance).
+// This is the enriched version of ScoreToolCall that factors in agent relationship data.
+// The sessionTracker parameter is used for delegation burst detection; it may be nil.
+func (e *Engine) ScoreWithContext(toolName, argsJSON, subjectID string, ctx *EventContext, sessionTracker *SessionTracker) Score {
+	score := e.ScoreToolCall(toolName, argsJSON, subjectID)
+
+	if ctx == nil {
+		return score
+	}
+
+	// Depth penalty: deeper agents get higher base risk
+	if ctx.Depth > 0 {
+		penalty := DepthPenalty(ctx.Depth)
+		score.Value += penalty
+		score.Reasons = append(score.Reasons, fmt.Sprintf("agent depth %d (+%d)", ctx.Depth, penalty))
+	}
+
+	// Delegation burst detection
+	if sessionTracker != nil {
+		burstCount, isBurst := sessionTracker.DetectDelegationBurst(subjectID)
+		if isBurst {
+			penalty := DelegationBurstPenalty(burstCount)
+			score.Value += penalty
+			score.Reasons = append(score.Reasons, fmt.Sprintf("delegation burst: %d actions in %.0fs (+%d)", burstCount, BurstWindow.Seconds(), penalty))
+		}
+	}
+
+	// Cap at 100
+	if score.Value > 100 {
+		score.Value = 100
+	}
+
+	// Re-evaluate level after adjustments
+	if score.Value >= e.thresholds.Deny {
+		score.Level = "critical"
+	} else if score.Value >= e.thresholds.Flag {
+		score.Level = "high"
+	} else if score.Value >= 30 {
+		score.Level = "medium"
+	} else {
+		score.Level = "low"
+	}
+
+	return score
 }
 
 // EnhanceWithRemote sends the local score to the remote API for enrichment.
