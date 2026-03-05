@@ -82,19 +82,64 @@ type RemoteAPIConfig struct {
 	TimeoutMs  int    `json:"timeout_ms,omitempty"`
 }
 
+// KafkaConfig configures the Kafka event streaming producer.
+type KafkaConfig struct {
+	Brokers     []string `json:"brokers"`
+	Enabled     bool     `json:"enabled"`
+	Async       bool     `json:"async"`         // fire-and-forget (default true)
+	BatchSize   int      `json:"batch_size"`     // messages per batch (default 100)
+	BatchTimeMs int      `json:"batch_time_ms"`  // batch flush interval ms (default 1000)
+}
+
+// AuthServiceConfig configures the cloud auth service integration.
+type AuthServiceConfig struct {
+	BaseURL           string `json:"base_url"`
+	CustomerID        string `json:"customer_id"`
+	Enabled           bool   `json:"enabled"`
+	TimeoutMs         int    `json:"timeout_ms,omitempty"`          // default 5000
+	KeyRefreshSeconds int    `json:"key_refresh_seconds,omitempty"` // default 300
+}
+
+// DomainRule is a per-domain policy override for the forward proxy.
+type DomainRule struct {
+	Domain string `json:"domain"` // glob pattern, e.g. "*.openai.com", "pastebin.com"
+	Action Action `json:"action"` // "allow" or "deny"
+}
+
+// ForwardProxyPolicy defines policy for the HTTP forward proxy.
+type ForwardProxyPolicy struct {
+	DefaultAction  Action       `json:"default_action"`          // "allow" or "deny"
+	Domains        []DomainRule `json:"domains"`                 // first-match-wins domain rules
+	LogBodies      bool         `json:"log_bodies"`              // capture request/response body previews
+	MaxBodyLogSize int          `json:"max_body_log_size"`       // max bytes per body preview (default 8192)
+}
+
+// GetMaxBodyLogSize returns the effective max body log size, defaulting to 8192.
+func (f *ForwardProxyPolicy) GetMaxBodyLogSize() int {
+	if f == nil || f.MaxBodyLogSize <= 0 {
+		return 8192
+	}
+	return f.MaxBodyLogSize
+}
+
 // PolicyConfig is the top-level policy file structure.
 type PolicyConfig struct {
-	Version                int            `json:"version"`
-	DataDir                string         `json:"data_dir"`
-	LogLevel               string         `json:"log_level"`
-	FailMode               string         `json:"fail_mode,omitempty"`  // "open" or "closed" (default "closed")
-	Servers                []ServerPolicy `json:"servers"`
-	Risk                   *RiskConfig    `json:"risk,omitempty"`
-	ApprovalRequired       bool           `json:"approval_required,omitempty"`
-	ApprovalTimeoutSeconds int            `json:"approval_timeout_seconds,omitempty"`
-	RateLimitRpm           int            `json:"rate_limit_rpm,omitempty"`
-	RateLimitBurst         int            `json:"rate_limit_burst,omitempty"`
-	Signature              string         `json:"_signature,omitempty"` // Ed25519 signature of the canonical policy JSON
+	Version                int                `json:"version"`
+	DataDir                string             `json:"data_dir"`
+	LogLevel               string             `json:"log_level"`
+	FailMode               string             `json:"fail_mode,omitempty"`  // "open" or "closed" (default "closed")
+	Servers                []ServerPolicy     `json:"servers"`
+	Risk                   *RiskConfig        `json:"risk,omitempty"`
+	Kafka                  *KafkaConfig       `json:"kafka,omitempty"`
+	AuthService            *AuthServiceConfig `json:"auth_service,omitempty"`
+	ApprovalRequired       bool               `json:"approval_required,omitempty"`
+	ApprovalTimeoutSeconds int                `json:"approval_timeout_seconds,omitempty"`
+	RateLimitRpm           int                `json:"rate_limit_rpm,omitempty"`
+	RateLimitBurst         int                `json:"rate_limit_burst,omitempty"`
+	Signature              string             `json:"_signature,omitempty"` // Ed25519 signature of the canonical policy JSON
+	AutoRegisterAgents     bool                `json:"auto_register_agents,omitempty"`
+	DefaultAgentScopes     string              `json:"default_agent_scopes,omitempty"` // default "tools:read"; use "tools:read,tools:write" for read+write
+	ForwardProxy           *ForwardProxyPolicy `json:"forward_proxy,omitempty"`
 }
 
 // GetApprovalTimeout returns the effective approval timeout in seconds, defaulting to 300.
@@ -314,6 +359,22 @@ func VerifyPolicy(data []byte, publicKey string) (PolicyConfig, bool, error) {
 	// Restore signature
 	policy.Signature = signature
 	return policy, true, nil
+}
+
+// EvaluateDomainPolicy determines the verdict for an HTTP request to a domain.
+// Uses the same first-match-wins logic as EvaluatePolicy.
+func EvaluateDomainPolicy(cfg PolicyConfig, host string) Verdict {
+	fp := cfg.ForwardProxy
+	if fp == nil {
+		return VerdictAllow
+	}
+	domain := StripPort(host)
+	for _, rule := range fp.Domains {
+		if GlobMatch(rule.Domain, domain) {
+			return Verdict(rule.Action)
+		}
+	}
+	return Verdict(fp.DefaultAction)
 }
 
 // LockdownPolicy returns an ultra-restrictive policy used when tamper detection fails.

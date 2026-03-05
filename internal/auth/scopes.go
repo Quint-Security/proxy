@@ -88,6 +88,34 @@ func EnforceScope(identity *Identity, toolName string) (string, bool) {
 	return required, false
 }
 
+// NormalizeScopes ensures scope strings use the "tools:" prefix format.
+// Bare scopes like "read" are mapped to "tools:read", etc.
+// Already-prefixed scopes are left unchanged.
+func NormalizeScopes(scopes []string) []string {
+	bareToFull := map[string]string{
+		"read":    ScopeToolsRead,
+		"write":   ScopeToolsWrite,
+		"admin":   ScopeToolsAdmin,
+		"execute": ScopeToolsExecute,
+	}
+	out := make([]string, len(scopes))
+	for i, s := range scopes {
+		if full, ok := bareToFull[s]; ok {
+			out[i] = full
+		} else {
+			out[i] = s
+		}
+	}
+	return out
+}
+
+// NormalizeScopeString normalizes a comma-separated scope string.
+func NormalizeScopeString(s string) string {
+	parsed := ParseScopes(s)
+	normalized := NormalizeScopes(parsed)
+	return strings.Join(normalized, ",")
+}
+
 // ParseScopes splits a comma-separated scope string into a slice.
 func ParseScopes(s string) []string {
 	if s == "" {

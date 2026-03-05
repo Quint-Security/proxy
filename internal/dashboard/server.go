@@ -1,11 +1,13 @@
 package dashboard
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -35,10 +37,39 @@ type Server struct {
 	sseClients   map[chan string]struct{}
 	sseClientsMu sync.Mutex
 	stopPoll     chan struct{}
+
+	// Graph SSE
+	graphClients   map[chan string]struct{}
+	graphClientsMu sync.Mutex
+
+	// HTTP stream SSE
+	httpStreamClients   map[chan string]struct{}
+	httpStreamClientsMu sync.Mutex
+
+	// Static file serving
+	staticDir string // if non-empty, serve from disk instead of embedded files
+
+	// HTTP server (stored for graceful shutdown in async mode)
+	httpServer *http.Server
+}
+
+// Opts configures the dashboard server.
+type Opts struct {
+	DataDir   string
+	Policy    intercept.PolicyConfig
+	StaticDir string // if set, serve from this directory instead of embedded files
 }
 
 // New creates a new dashboard server.
+// Deprecated: use NewWithOpts instead.
 func New(dataDir string, policy intercept.PolicyConfig) (*Server, error) {
+	return NewWithOpts(Opts{DataDir: dataDir, Policy: policy})
+}
+
+// NewWithOpts creates a new dashboard server with the given options.
+func NewWithOpts(opts Opts) (*Server, error) {
+	dataDir := opts.DataDir
+	policy := opts.Policy
 	auditDB, err := audit.OpenDB(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("open audit db: %w", err)
@@ -63,8 +94,11 @@ func New(dataDir string, policy intercept.PolicyConfig) (*Server, error) {
 		approvalDB: approvalDB,
 		policy:     policy,
 		dataDir:    dataDir,
-		sseClients: make(map[chan string]struct{}),
-		stopPoll:   make(chan struct{}),
+		sseClients:        make(map[chan string]struct{}),
+		stopPoll:          make(chan struct{}),
+		graphClients:      make(map[chan string]struct{}),
+		httpStreamClients: make(map[chan string]struct{}),
+		staticDir:         opts.StaticDir,
 	}
 
 	// Verify audit chain integrity on startup
@@ -78,19 +112,26 @@ func New(dataDir string, policy intercept.PolicyConfig) (*Server, error) {
 	return s, nil
 }
 
-// Start starts the dashboard on the given port.
-func (s *Server) Start(port int) error {
+// buildMux creates the HTTP mux with all routes.
+func (s *Server) buildMux() (*http.ServeMux, error) {
 	mux := http.NewServeMux()
 
 	// API routes
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/audit", s.handleAudit)
 	mux.HandleFunc("/api/agents", s.handleAgents)
+	mux.HandleFunc("/api/agents/graphs/stream", s.handleGraphStream)
+	mux.HandleFunc("/api/agents/graphs", s.handleAgentGraphs)
+	mux.HandleFunc("/api/agents/graphs/", s.handleAgentGraphByID)
 	mux.HandleFunc("/api/agents/", s.handleAgentAction)
 	mux.HandleFunc("/api/approvals", s.handleApprovals)
 	mux.HandleFunc("/api/approvals/", s.handleApprovalAction)
 	mux.HandleFunc("/api/policy", s.handlePolicy)
 	mux.HandleFunc("/api/events", s.handleSSE)
+
+	// HTTP stream graph
+	mux.HandleFunc("/api/stream/http", s.handleHTTPStream)
+	mux.HandleFunc("/api/stream/http/graph", s.handleHTTPStreamGraph)
 
 	// Cloud API proxy routes
 	mux.HandleFunc("/api/cloud/scores", s.handleCloudScores)
@@ -99,17 +140,33 @@ func (s *Server) Start(port int) error {
 	mux.HandleFunc("/api/cloud/justification", s.handleCloudJustification)
 	mux.HandleFunc("/api/cloud/health", s.handleCloudHealth)
 
-	// Start polling for new audit entries
-	go s.pollAuditUpdates()
-
 	// Static files — SPA-aware handler for Next.js static export
-	sub, err := fs.Sub(staticFiles, "static")
-	if err != nil {
-		return fmt.Errorf("static files: %w", err)
+	if s.staticDir != "" {
+		fmt.Printf("Serving static files from: %s\n", s.staticDir)
+		mux.Handle("/", &spaHandler{fs: http.Dir(s.staticDir)})
+	} else {
+		sub, err := fs.Sub(staticFiles, "static")
+		if err != nil {
+			return nil, fmt.Errorf("static files: %w", err)
+		}
+		mux.Handle("/", &spaHandler{fs: http.FS(sub)})
 	}
-	mux.Handle("/", &spaHandler{fs: http.FS(sub)})
 
-	srv := &http.Server{
+	return mux, nil
+}
+
+// Start starts the dashboard on the given port (blocking).
+func (s *Server) Start(port int) error {
+	mux, err := s.buildMux()
+	if err != nil {
+		return err
+	}
+
+	go s.pollAuditUpdates()
+	go s.pollGraphUpdates()
+	go s.pollHTTPStreamUpdates()
+
+	s.httpServer = &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
 		Handler:      corsMiddleware(mux),
 		ReadTimeout:  10 * time.Second,
@@ -117,10 +174,47 @@ func (s *Server) Start(port int) error {
 	}
 
 	fmt.Printf("Quint dashboard: http://localhost:%d\n", port)
-	return srv.ListenAndServe()
+	return s.httpServer.ListenAndServe()
 }
 
-// Close cleans up resources.
+// StartAsync starts the dashboard non-blocking and returns immediately.
+// The server runs in the background. Call Shutdown() to stop it.
+func (s *Server) StartAsync(port int) error {
+	mux, err := s.buildMux()
+	if err != nil {
+		return err
+	}
+
+	s.httpServer = &http.Server{
+		Addr:         fmt.Sprintf(":%d", port),
+		Handler:      corsMiddleware(mux),
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 30 * time.Second,
+	}
+
+	go s.pollAuditUpdates()
+	go s.pollGraphUpdates()
+	go s.pollHTTPStreamUpdates()
+
+	ln, err := net.Listen("tcp", s.httpServer.Addr)
+	if err != nil {
+		return err
+	}
+	go s.httpServer.Serve(ln)
+	return nil
+}
+
+// Shutdown gracefully stops the HTTP server and cleans up resources.
+func (s *Server) Shutdown() {
+	if s.httpServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.httpServer.Shutdown(ctx)
+	}
+	s.Close()
+}
+
+// Close cleans up resources (pollers and databases).
 func (s *Server) Close() {
 	close(s.stopPoll)
 	if s.auditDB != nil {
@@ -472,9 +566,328 @@ func (s *Server) pollAuditUpdates() {
 	}
 }
 
+// --- Agent Graph REST + SSE ---
+
+// handleAgentGraphs returns all current agent graphs: GET /api/agents/graphs
+func (s *Server) handleAgentGraphs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		s.jsonErr(w, 405, "use GET")
+		return
+	}
+	graphs := s.currentGraphs()
+	s.json(w, 200, map[string]any{"graphs": graphs})
+}
+
+// handleAgentGraphByID returns a single graph or node events.
+// GET /api/agents/graphs/{id}
+// GET /api/agents/graphs/{id}/nodes/{nodeId}/events
+func (s *Server) handleAgentGraphByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		s.jsonErr(w, 405, "use GET")
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/agents/graphs/")
+	parts := strings.Split(path, "/")
+
+	graphs := s.currentGraphs()
+
+	// GET /api/agents/graphs/{id}
+	if len(parts) == 1 {
+		for _, g := range graphs {
+			if g.ID == parts[0] {
+				s.json(w, 200, g)
+				return
+			}
+		}
+		s.jsonErr(w, 404, "graph not found")
+		return
+	}
+
+	// GET /api/agents/graphs/{id}/nodes/{nodeId}/events
+	if len(parts) == 4 && parts[1] == "nodes" && parts[3] == "events" {
+		graphID := parts[0]
+		nodeID := parts[2]
+
+		var targetGraph *AgentGraph
+		for i := range graphs {
+			if graphs[i].ID == graphID {
+				targetGraph = &graphs[i]
+				break
+			}
+		}
+		if targetGraph == nil {
+			s.jsonErr(w, 404, "graph not found")
+			return
+		}
+
+		// Find the node to get the agent name
+		var agentName string
+		for _, n := range targetGraph.Nodes {
+			if n.ID == nodeID {
+				agentName = n.AgentName
+				break
+			}
+		}
+		if agentName == "" {
+			s.jsonErr(w, 404, "node not found")
+			return
+		}
+
+		entries, _, _ := s.auditDB.Query(audit.QueryOpts{Limit: 100, AgentName: agentName})
+		events := nodeEventsForAgent(entries, agentName)
+		for i := range events {
+			events[i].GraphID = graphID
+			events[i].NodeID = nodeID
+		}
+		s.json(w, 200, map[string]any{"events": events})
+		return
+	}
+
+	s.jsonErr(w, 400, "invalid path")
+}
+
+// handleGraphStream is the SSE endpoint: GET /api/agents/graphs/stream
+func (s *Server) handleGraphStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	// Send connected event
+	fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]any{"type": "connected"}))
+	flusher.Flush()
+
+	// Send all current graphs as graph_new events
+	graphs := s.currentGraphs()
+	for _, g := range graphs {
+		fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]any{
+			"type":  "graph_new",
+			"graph": g,
+		}))
+	}
+	flusher.Flush()
+
+	// Register for updates
+	ch := make(chan string, 32)
+	s.graphClientsMu.Lock()
+	s.graphClients[ch] = struct{}{}
+	s.graphClientsMu.Unlock()
+
+	defer func() {
+		s.graphClientsMu.Lock()
+		delete(s.graphClients, ch)
+		close(ch)
+		s.graphClientsMu.Unlock()
+	}()
+
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(w, "data: %s\n\n", msg)
+			flusher.Flush()
+		}
+	}
+}
+
+func (s *Server) broadcastGraph(msg string) {
+	s.graphClientsMu.Lock()
+	defer s.graphClientsMu.Unlock()
+	for ch := range s.graphClients {
+		select {
+		case ch <- msg:
+		default:
+		}
+	}
+}
+
+func (s *Server) currentGraphs() []AgentGraph {
+	entries, _ := s.auditDB.GetAll()
+	relationships, _ := s.auditDB.GetAllRelationships()
+	return buildAgentGraphs(entries, relationships)
+}
+
+func (s *Server) pollGraphUpdates() {
+	var lastAuditCount int
+
+	// Seed
+	entries, _ := s.auditDB.GetAll()
+	lastAuditCount = len(entries)
+	relationships, _ := s.auditDB.GetAllRelationships()
+	prevGraphs := buildAgentGraphs(entries, relationships)
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopPoll:
+			return
+		case <-ticker.C:
+			currentCount := s.auditDB.Count()
+			if currentCount == lastAuditCount {
+				continue
+			}
+			lastAuditCount = currentCount
+
+			newEntries, _ := s.auditDB.GetAll()
+			newRels, _ := s.auditDB.GetAllRelationships()
+			newGraphs := buildAgentGraphs(newEntries, newRels)
+
+			added, updated := diffGraphs(prevGraphs, newGraphs)
+			for _, g := range added {
+				s.broadcastGraph(mustJSON(map[string]any{
+					"type":  "graph_new",
+					"graph": g,
+				}))
+			}
+			for _, g := range updated {
+				s.broadcastGraph(mustJSON(map[string]any{
+					"type":  "graph_update",
+					"graph": g,
+				}))
+			}
+			prevGraphs = newGraphs
+		}
+	}
+}
+
 func mustJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// --- HTTP Stream Graph ---
+
+// handleHTTPStreamGraph returns the current HTTP traffic graph: GET /api/stream/http/graph
+func (s *Server) handleHTTPStreamGraph(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		s.jsonErr(w, 405, "use GET")
+		return
+	}
+	entries, _ := s.auditDB.GetAll()
+	graph := buildHTTPStreamGraph(entries)
+	if graph == nil {
+		s.json(w, 200, map[string]any{"graph": nil, "message": "no HTTP traffic yet"})
+		return
+	}
+	s.json(w, 200, map[string]any{"graph": graph})
+}
+
+// handleHTTPStream is the SSE endpoint for real-time HTTP traffic: GET /api/stream/http
+func (s *Server) handleHTTPStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	// Send initial state: connected + current graph snapshot
+	entries, _ := s.auditDB.GetAll()
+	graph := buildHTTPStreamGraph(entries)
+
+	fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]any{
+		"type":  "connected",
+		"graph": graph,
+	}))
+	flusher.Flush()
+
+	// Register for live updates
+	ch := make(chan string, 64)
+	s.httpStreamClientsMu.Lock()
+	s.httpStreamClients[ch] = struct{}{}
+	s.httpStreamClientsMu.Unlock()
+
+	defer func() {
+		s.httpStreamClientsMu.Lock()
+		delete(s.httpStreamClients, ch)
+		close(ch)
+		s.httpStreamClientsMu.Unlock()
+	}()
+
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(w, "data: %s\n\n", msg)
+			flusher.Flush()
+		}
+	}
+}
+
+func (s *Server) broadcastHTTPStream(msg string) {
+	s.httpStreamClientsMu.Lock()
+	defer s.httpStreamClientsMu.Unlock()
+	for ch := range s.httpStreamClients {
+		select {
+		case ch <- msg:
+		default:
+		}
+	}
+}
+
+func (s *Server) pollHTTPStreamUpdates() {
+	lastCount := s.auditDB.Count()
+	ticker := time.NewTicker(1 * time.Second) // faster polling for real-time feel
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopPoll:
+			return
+		case <-ticker.C:
+			current := s.auditDB.Count()
+			if current <= lastCount {
+				continue
+			}
+
+			delta := current - lastCount
+			newEntries, _ := s.auditDB.GetLast(delta)
+			lastCount = current
+
+			// Stream individual HTTP events
+			for _, e := range newEntries {
+				ev := entryToHTTPStreamEvent(e)
+				if ev == nil {
+					continue
+				}
+				s.broadcastHTTPStream(mustJSON(map[string]any{
+					"type":  "http_event",
+					"event": ev,
+				}))
+			}
+
+			// Also send updated graph snapshot periodically
+			allEntries, _ := s.auditDB.GetAll()
+			graph := buildHTTPStreamGraph(allEntries)
+			if graph != nil {
+				s.broadcastHTTPStream(mustJSON(map[string]any{
+					"type":  "graph_update",
+					"graph": graph,
+				}))
+			}
+		}
+	}
 }
 
 // corsMiddleware adds CORS headers for local dev when dashboard runs separately.

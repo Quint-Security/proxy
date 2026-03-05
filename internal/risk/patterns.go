@@ -40,6 +40,39 @@ var DefaultToolRisks = []RiskPattern{
 	{Tool: "Search*", BaseScore: 10},
 }
 
+// DefaultHTTPRisks are built-in risk patterns for HTTP forward proxy traffic.
+// These match against canonical action strings like "http:api.github.com:post.repos".
+var DefaultHTTPRisks = []RiskPattern{
+	// High-risk destinations
+	{Tool: "http:*pastebin*:*", BaseScore: 70},
+	{Tool: "http:*torproject*:*", BaseScore: 80},
+	{Tool: "http:*webhook*:post.*", BaseScore: 50},
+	// Code hosting (writes)
+	{Tool: "http:*github*:post.*", BaseScore: 45},
+	{Tool: "http:*github*:put.*", BaseScore: 45},
+	{Tool: "http:*github*:delete.*", BaseScore: 65},
+	{Tool: "http:*gitlab*:post.*", BaseScore: 45},
+	// AI providers (delegation potential)
+	{Tool: "http:*openai*:post.*", BaseScore: 40},
+	{Tool: "http:*anthropic*:post.*", BaseScore: 40},
+	// Cloud infrastructure
+	{Tool: "http:*amazonaws*:post.*", BaseScore: 55},
+	{Tool: "http:*amazonaws*:put.*", BaseScore: 55},
+	{Tool: "http:*amazonaws*:delete.*", BaseScore: 70},
+	{Tool: "http:*googleapis*:post.*", BaseScore: 50},
+	// Payment / sensitive
+	{Tool: "http:*stripe*:post.*", BaseScore: 60},
+	{Tool: "http:*stripe*:delete.*", BaseScore: 75},
+	// Messaging
+	{Tool: "http:*slack*:post.*", BaseScore: 45},
+	// Read operations (low risk)
+	{Tool: "http:*:get.*", BaseScore: 10},
+	{Tool: "http:*:head.*", BaseScore: 5},
+	{Tool: "http:*:options.*", BaseScore: 5},
+	// CONNECT tunnels
+	{Tool: "http:*:connect.*", BaseScore: 15},
+}
+
 // ArgKeyword defines a pattern that, when found in arguments, boosts the risk score.
 type ArgKeyword struct {
 	Pattern *regexp.Regexp

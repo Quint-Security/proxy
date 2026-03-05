@@ -178,9 +178,13 @@ func (r *RemoteScorer) EnhanceScore(localScore Score, toolName, argsJSON, subjec
 	// Enrich from EventContext if provided
 	if ctx != nil {
 		if ctx.AgentID != "" {
+			agentType := ctx.AgentType
+			if agentType == "" {
+				agentType = "generic"
+			}
 			req.Agent = &AgentInfoPayload{
 				AgentID:   ctx.AgentID,
-				AgentType: "mcp_client",
+				AgentType: agentType,
 				Framework: "quint-proxy",
 			}
 		}

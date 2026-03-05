@@ -34,10 +34,41 @@ CREATE TABLE IF NOT EXISTS audit_log (
   public_key      TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS agent_relationships (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  parent_agent    TEXT NOT NULL,
+  child_agent     TEXT NOT NULL,
+  confidence      REAL NOT NULL DEFAULT 0.0,
+  depth           INTEGER NOT NULL DEFAULT 0,
+  spawn_type      TEXT,
+  signal_type     TEXT,
+  first_seen      TEXT NOT NULL,
+  last_seen       TEXT NOT NULL,
+  signal_count    INTEGER NOT NULL DEFAULT 1,
+  trace_id        TEXT,
+  UNIQUE(parent_agent, child_agent)
+);
+
+CREATE TABLE IF NOT EXISTS spawn_events (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp       TEXT NOT NULL,
+  pattern_id      TEXT NOT NULL,
+  parent_agent    TEXT NOT NULL,
+  child_hint      TEXT,
+  spawn_type      TEXT NOT NULL,
+  confidence      REAL NOT NULL,
+  tool_name       TEXT NOT NULL,
+  server_name     TEXT NOT NULL,
+  arguments_ref   TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_timestamp   ON audit_log(timestamp);
 CREATE INDEX IF NOT EXISTS idx_server_name ON audit_log(server_name);
 CREATE INDEX IF NOT EXISTS idx_tool_name   ON audit_log(tool_name);
 CREATE INDEX IF NOT EXISTS idx_verdict     ON audit_log(verdict);
+CREATE INDEX IF NOT EXISTS idx_rel_parent  ON agent_relationships(parent_agent);
+CREATE INDEX IF NOT EXISTS idx_rel_child   ON agent_relationships(child_agent);
+CREATE INDEX IF NOT EXISTS idx_spawn_ts    ON spawn_events(timestamp);
 `
 
 // Migrations for DBs created before risk/chain fields were added.
@@ -59,6 +90,22 @@ var migrations = []string{
 	`ALTER TABLE audit_log ADD COLUMN score_decomposition TEXT`,
 	`ALTER TABLE audit_log ADD COLUMN mitigations TEXT`,
 	`ALTER TABLE audit_log ADD COLUMN cloud_event_id TEXT`,
+	`ALTER TABLE audit_log ADD COLUMN trace_id TEXT`,
+	`ALTER TABLE audit_log ADD COLUMN agent_depth INTEGER`,
+	`ALTER TABLE audit_log ADD COLUMN parent_agent_id TEXT`,
+	`ALTER TABLE audit_log ADD COLUMN spawn_detected TEXT`,
+	`CREATE TABLE IF NOT EXISTS agent_relationships (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, parent_agent TEXT NOT NULL, child_agent TEXT NOT NULL,
+		confidence REAL NOT NULL DEFAULT 0.0, depth INTEGER NOT NULL DEFAULT 0, spawn_type TEXT,
+		signal_type TEXT, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL,
+		signal_count INTEGER NOT NULL DEFAULT 1, trace_id TEXT, UNIQUE(parent_agent, child_agent))`,
+	`CREATE TABLE IF NOT EXISTS spawn_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, pattern_id TEXT NOT NULL,
+		parent_agent TEXT NOT NULL, child_hint TEXT, spawn_type TEXT NOT NULL,
+		confidence REAL NOT NULL, tool_name TEXT NOT NULL, server_name TEXT NOT NULL, arguments_ref TEXT)`,
+	`CREATE INDEX IF NOT EXISTS idx_rel_parent ON agent_relationships(parent_agent)`,
+	`CREATE INDEX IF NOT EXISTS idx_rel_child ON agent_relationships(child_agent)`,
+	`CREATE INDEX IF NOT EXISTS idx_spawn_ts ON spawn_events(timestamp)`,
 }
 
 const (
@@ -97,6 +144,10 @@ type Entry struct {
 	ScoreDecomposition *string
 	Mitigations        *string
 	CloudEventID       *string
+	TraceID            *string
+	AgentDepth         *int
+	ParentAgentID      *string
+	SpawnDetected      *string
 }
 
 // DB wraps the SQLite audit database.
@@ -182,8 +233,9 @@ func (d *DB) tryInsertAtomic(buildEntry func(prevSignature string) Entry) (int64
 			 arguments_json, response_json, verdict, risk_score, risk_level,
 			 policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name,
 			 scoring_source, local_score, remote_score, gnn_score, confidence,
-			 compliance_refs, behavioral_flags, score_decomposition, mitigations, cloud_event_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 compliance_refs, behavioral_flags, score_decomposition, mitigations, cloud_event_id,
+			 trace_id, agent_depth, parent_agent_id, spawn_detected)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.Timestamp, entry.ServerName, entry.Direction, entry.Method,
 		entry.MessageID, entry.ToolName, entry.ArgumentsJSON, entry.ResponseJSON,
 		entry.Verdict, entry.RiskScore, entry.RiskLevel,
@@ -191,7 +243,7 @@ func (d *DB) tryInsertAtomic(buildEntry func(prevSignature string) Entry) (int64
 		entry.AgentID, entry.AgentName,
 		entry.ScoringSource, entry.LocalScore, entry.RemoteScore, entry.GNNScore, entry.Confidence,
 		entry.ComplianceRefs, entry.BehavioralFlags, entry.ScoreDecomposition, entry.Mitigations,
-		entry.CloudEventID,
+		entry.CloudEventID, entry.TraceID, entry.AgentDepth, entry.ParentAgentID, entry.SpawnDetected,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert audit entry: %w", err)
@@ -254,7 +306,7 @@ func (d *DB) Query(opts QueryOpts) ([]Entry, int, error) {
 		limit = 50
 	}
 	query := fmt.Sprintf(
-		"SELECT id, timestamp, server_name, direction, method, message_id, tool_name, arguments_json, response_json, verdict, risk_score, risk_level, policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name, scoring_source, local_score, remote_score, gnn_score, confidence, compliance_refs, behavioral_flags, score_decomposition, mitigations, cloud_event_id FROM audit_log WHERE %s ORDER BY id DESC LIMIT ? OFFSET ?",
+		"SELECT id, timestamp, server_name, direction, method, message_id, tool_name, arguments_json, response_json, verdict, risk_score, risk_level, policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name, scoring_source, local_score, remote_score, gnn_score, confidence, compliance_refs, behavioral_flags, score_decomposition, mitigations, cloud_event_id, trace_id, agent_depth, parent_agent_id, spawn_detected FROM audit_log WHERE %s ORDER BY id DESC LIMIT ? OFFSET ?",
 		where,
 	)
 	args = append(args, limit, opts.Offset)
@@ -268,7 +320,7 @@ func (d *DB) Query(opts QueryOpts) ([]Entry, int, error) {
 	var entries []Entry
 	for rows.Next() {
 		var e Entry
-		if err := rows.Scan(&e.ID, &e.Timestamp, &e.ServerName, &e.Direction, &e.Method, &e.MessageID, &e.ToolName, &e.ArgumentsJSON, &e.ResponseJSON, &e.Verdict, &e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce, &e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName, &e.ScoringSource, &e.LocalScore, &e.RemoteScore, &e.GNNScore, &e.Confidence, &e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations, &e.CloudEventID); err != nil {
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.ServerName, &e.Direction, &e.Method, &e.MessageID, &e.ToolName, &e.ArgumentsJSON, &e.ResponseJSON, &e.Verdict, &e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce, &e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName, &e.ScoringSource, &e.LocalScore, &e.RemoteScore, &e.GNNScore, &e.Confidence, &e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations, &e.CloudEventID, &e.TraceID, &e.AgentDepth, &e.ParentAgentID, &e.SpawnDetected); err != nil {
 			return nil, 0, err
 		}
 		entries = append(entries, e)
@@ -339,7 +391,8 @@ func (d *DB) GetRange(opts RangeOpts) ([]Entry, error) {
 		        arguments_json, response_json, verdict, risk_score, risk_level,
 		        policy_hash, prev_hash, nonce, signature, public_key, agent_id, agent_name,
 		        scoring_source, local_score, remote_score, gnn_score, confidence,
-		        compliance_refs, behavioral_flags, score_decomposition, mitigations, cloud_event_id
+		        compliance_refs, behavioral_flags, score_decomposition, mitigations, cloud_event_id,
+		        trace_id, agent_depth, parent_agent_id, spawn_detected
 		 FROM audit_log WHERE %s ORDER BY id ASC`, where,
 	)
 
@@ -357,7 +410,8 @@ func (d *DB) GetRange(opts RangeOpts) ([]Entry, error) {
 			&e.RiskScore, &e.RiskLevel, &e.PolicyHash, &e.PrevHash, &e.Nonce,
 			&e.Signature, &e.PublicKey, &e.AgentID, &e.AgentName,
 			&e.ScoringSource, &e.LocalScore, &e.RemoteScore, &e.GNNScore, &e.Confidence,
-			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations, &e.CloudEventID); err != nil {
+			&e.ComplianceRefs, &e.BehavioralFlags, &e.ScoreDecomposition, &e.Mitigations,
+			&e.CloudEventID, &e.TraceID, &e.AgentDepth, &e.ParentAgentID, &e.SpawnDetected); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
@@ -406,6 +460,124 @@ func (d *DB) VerifyChain() (verified int, brokenAt int64, err error) {
 	}
 
 	return verified, 0, nil
+}
+
+// InsertSpawnEvent records a spawn detection event.
+func (d *DB) InsertSpawnEvent(timestamp, patternID, parentAgent, childHint, spawnType, toolName, serverName, argsRef string, confidence float64) error {
+	_, err := d.db.Exec(`
+		INSERT INTO spawn_events (timestamp, pattern_id, parent_agent, child_hint, spawn_type, confidence, tool_name, server_name, arguments_ref)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		timestamp, patternID, parentAgent, childHint, spawnType, confidence, toolName, serverName, argsRef,
+	)
+	return err
+}
+
+// UpsertRelationship creates or updates an agent relationship.
+func (d *DB) UpsertRelationship(parentAgent, childAgent string, confidence float64, depth int, spawnType, signalType, traceID string) error {
+	now := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	_, err := d.db.Exec(`
+		INSERT INTO agent_relationships (parent_agent, child_agent, confidence, depth, spawn_type, signal_type, first_seen, last_seen, signal_count, trace_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+		ON CONFLICT(parent_agent, child_agent) DO UPDATE SET
+			confidence = MAX(confidence, excluded.confidence),
+			last_seen = excluded.last_seen,
+			signal_count = signal_count + 1,
+			trace_id = COALESCE(excluded.trace_id, trace_id)`,
+		parentAgent, childAgent, confidence, depth, spawnType, signalType, now, now, traceID,
+	)
+	return err
+}
+
+// GetAgentRelationships returns all relationships for an agent (as parent or child).
+func (d *DB) GetAgentRelationships(agentID string) ([]AgentRelationshipRow, error) {
+	rows, err := d.db.Query(`
+		SELECT id, parent_agent, child_agent, confidence, depth, spawn_type, signal_type, first_seen, last_seen, signal_count, trace_id
+		FROM agent_relationships WHERE parent_agent = ? OR child_agent = ? ORDER BY last_seen DESC`, agentID, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []AgentRelationshipRow
+	for rows.Next() {
+		var r AgentRelationshipRow
+		if err := rows.Scan(&r.ID, &r.ParentAgent, &r.ChildAgent, &r.Confidence, &r.Depth, &r.SpawnType, &r.SignalType, &r.FirstSeen, &r.LastSeen, &r.SignalCount, &r.TraceID); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, nil
+}
+
+// AgentRelationshipRow represents a row from the agent_relationships table.
+type AgentRelationshipRow struct {
+	ID          int64
+	ParentAgent string
+	ChildAgent  string
+	Confidence  float64
+	Depth       int
+	SpawnType   *string
+	SignalType  *string
+	FirstSeen   string
+	LastSeen    string
+	SignalCount int
+	TraceID     *string
+}
+
+// GetAllRelationships returns all agent relationships.
+func (d *DB) GetAllRelationships() ([]AgentRelationshipRow, error) {
+	rows, err := d.db.Query(`
+		SELECT id, parent_agent, child_agent, confidence, depth, spawn_type, signal_type, first_seen, last_seen, signal_count, trace_id
+		FROM agent_relationships ORDER BY last_seen DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []AgentRelationshipRow
+	for rows.Next() {
+		var r AgentRelationshipRow
+		if err := rows.Scan(&r.ID, &r.ParentAgent, &r.ChildAgent, &r.Confidence, &r.Depth, &r.SpawnType, &r.SignalType, &r.FirstSeen, &r.LastSeen, &r.SignalCount, &r.TraceID); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, nil
+}
+
+// SpawnEventRow represents a row from the spawn_events table.
+type SpawnEventRow struct {
+	ID           int64
+	Timestamp    string
+	PatternID    string
+	ParentAgent  string
+	ChildHint    *string
+	SpawnType    string
+	Confidence   float64
+	ToolName     string
+	ServerName   string
+	ArgumentsRef *string
+}
+
+// GetAllSpawnEvents returns all spawn detection events.
+func (d *DB) GetAllSpawnEvents() ([]SpawnEventRow, error) {
+	rows, err := d.db.Query(`
+		SELECT id, timestamp, pattern_id, parent_agent, child_hint, spawn_type, confidence, tool_name, server_name, arguments_ref
+		FROM spawn_events ORDER BY timestamp ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []SpawnEventRow
+	for rows.Next() {
+		var r SpawnEventRow
+		if err := rows.Scan(&r.ID, &r.Timestamp, &r.PatternID, &r.ParentAgent, &r.ChildHint, &r.SpawnType, &r.Confidence, &r.ToolName, &r.ServerName, &r.ArgumentsRef); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, nil
 }
 
 // Close closes the database.

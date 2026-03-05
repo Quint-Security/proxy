@@ -3,6 +3,9 @@ package gateway
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/Quint-Security/quint-proxy/internal/auth"
+	"github.com/Quint-Security/quint-proxy/internal/intercept"
 )
 
 func TestSplitNamespacedTool(t *testing.T) {
@@ -57,7 +60,7 @@ func TestGatewayHandleInitialize(t *testing.T) {
 		toolIndex: make(map[string]string),
 	}
 
-	resp := g.handleInitialize(json.RawMessage(`1`))
+	resp := g.handleInitialize(json.RawMessage(`1`), nil)
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(resp), &parsed); err != nil {
 		t.Fatalf("invalid JSON response: %v", err)
@@ -122,6 +125,178 @@ func TestGatewayJsonRpcError(t *testing.T) {
 	errObj := parsed["error"].(map[string]any)
 	if errObj["code"].(float64) != -32601 {
 		t.Errorf("error code = %v, want -32601", errObj["code"])
+	}
+}
+
+func TestGatewayHandleInitializeWithClientInfo(t *testing.T) {
+	g := &Gateway{
+		backends:  make(map[string]Backend),
+		toolIndex: make(map[string]string),
+		policy:    intercept.DefaultPolicy(),
+	}
+
+	params := json.RawMessage(`{"protocolVersion":"2024-11-05","clientInfo":{"name":"test-agent","version":"1.0"}}`)
+	resp := g.handleInitialize(json.RawMessage(`2`), params)
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(resp), &parsed); err != nil {
+		t.Fatalf("invalid JSON response: %v", err)
+	}
+
+	result, ok := parsed["result"].(map[string]any)
+	if !ok {
+		t.Fatal("missing result")
+	}
+	serverInfo := result["serverInfo"].(map[string]any)
+	if serverInfo["name"] != "quint-gateway" {
+		t.Errorf("server name = %v, want quint-gateway", serverInfo["name"])
+	}
+
+	// Identity should remain nil (no authDB, no matching agent)
+	if g.identity != nil {
+		t.Errorf("identity should be nil without authDB, got %+v", g.identity)
+	}
+}
+
+func TestGatewayHandleInitializeWithQuintAuth(t *testing.T) {
+	g := &Gateway{
+		backends:  make(map[string]Backend),
+		toolIndex: make(map[string]string),
+		policy:    intercept.DefaultPolicy(),
+	}
+
+	params := json.RawMessage(`{"clientInfo":{"name":"x"},"_quint":{"api_key":"qk_test123"}}`)
+	resp := g.handleInitialize(json.RawMessage(`3`), params)
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(resp), &parsed); err != nil {
+		t.Fatalf("invalid JSON response: %v", err)
+	}
+
+	// Should still return valid response even if auth fails
+	if parsed["result"] == nil {
+		t.Error("missing result — initialize must always return a response")
+	}
+}
+
+func TestGatewayHandleMessageInitialize(t *testing.T) {
+	g := &Gateway{
+		backends:  make(map[string]Backend),
+		toolIndex: make(map[string]string),
+		policy:    intercept.DefaultPolicy(),
+	}
+
+	// Full JSON-RPC initialize message through handleMessage
+	msg := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"claude","version":"3.5"}}}`
+	resp := g.handleMessage(msg)
+
+	if resp == "" {
+		t.Fatal("handleMessage returned empty string for initialize")
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(resp), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if parsed["result"] == nil {
+		t.Error("missing result in initialize response")
+	}
+}
+
+func TestGatewaySessionIdentityResolution(t *testing.T) {
+	tmpDir := t.TempDir()
+	authDB, err := auth.OpenDB(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to open auth DB: %v", err)
+	}
+	defer authDB.Close()
+
+	// Register an agent
+	agent, _, err := authDB.CreateAgent("my-agent", "generic", "", "read,write", "test")
+	if err != nil {
+		t.Fatalf("failed to create agent: %v", err)
+	}
+
+	g := &Gateway{
+		backends:  make(map[string]Backend),
+		toolIndex: make(map[string]string),
+		policy:    intercept.DefaultPolicy(),
+		authDB:    authDB,
+	}
+
+	// Initialize with matching clientInfo.name
+	params := json.RawMessage(`{"protocolVersion":"2024-11-05","clientInfo":{"name":"my-agent","version":"1.0"}}`)
+	resp := g.handleInitialize(json.RawMessage(`1`), params)
+
+	// Must return valid response
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(resp), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if parsed["result"] == nil {
+		t.Fatal("missing result in initialize response")
+	}
+
+	// Identity should be resolved to the registered agent
+	if g.identity == nil {
+		t.Fatal("identity should be resolved")
+	}
+	if g.identity.AgentID != agent.ID {
+		t.Errorf("agent ID = %q, want %q", g.identity.AgentID, agent.ID)
+	}
+	if g.identity.AgentName != "my-agent" {
+		t.Errorf("agent name = %q, want my-agent", g.identity.AgentName)
+	}
+	if g.identity.Source != "client_info" {
+		t.Errorf("source = %q, want client_info", g.identity.Source)
+	}
+}
+
+func TestGatewayAutoRegisterAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+	authDB, err := auth.OpenDB(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to open auth DB: %v", err)
+	}
+	defer authDB.Close()
+
+	policy := intercept.DefaultPolicy()
+	policy.AutoRegisterAgents = true
+	policy.DefaultAgentScopes = "read"
+
+	g := &Gateway{
+		backends:  make(map[string]Backend),
+		toolIndex: make(map[string]string),
+		policy:    policy,
+		authDB:    authDB,
+	}
+
+	// Initialize with unknown clientInfo.name (should auto-register)
+	params := json.RawMessage(`{"protocolVersion":"2024-11-05","clientInfo":{"name":"new-bot","version":"2.0"}}`)
+	resp := g.handleInitialize(json.RawMessage(`1`), params)
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(resp), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	if g.identity == nil {
+		t.Fatal("identity should be auto-registered")
+	}
+	if g.identity.AgentName != "new-bot" {
+		t.Errorf("agent name = %q, want new-bot", g.identity.AgentName)
+	}
+	if g.identity.Source != "auto_register" {
+		t.Errorf("source = %q, want auto_register", g.identity.Source)
+	}
+
+	// Verify agent was persisted in DB
+	agent, err := authDB.GetAgentByName("new-bot")
+	if err != nil {
+		t.Fatalf("agent not found in DB: %v", err)
+	}
+	if agent.Type != "generic" {
+		t.Errorf("agent type = %q, want generic", agent.Type)
 	}
 }
 

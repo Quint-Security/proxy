@@ -1,15 +1,29 @@
 package main
 
 import (
+	"github.com/Quint-Security/quint-proxy/internal/auth"
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
 	qlog "github.com/Quint-Security/quint-proxy/internal/log"
 	"github.com/Quint-Security/quint-proxy/internal/risk"
+	"github.com/Quint-Security/quint-proxy/internal/stream"
 )
 
 // sessionTracker is the global session tracker for relay mode.
 var sessionTracker *risk.SessionTracker
 
-func initRisk(dataDir string, policy intercept.PolicyConfig, scoreTool *scoreFunc, evalRisk *evalFunc, revoke *revokeFunc) {
+// spawnDetector is the global spawn detector for relay mode.
+var spawnDetector *intercept.SpawnDetector
+
+// correlationEngine is the global correlation engine for relay mode.
+var correlationEngine *intercept.CorrelationEngine
+
+// kafkaProducer is the global Kafka producer for relay mode.
+var kafkaProducer *stream.Producer
+
+// ticketSigner is the global spawn ticket signer for relay mode.
+var ticketSigner *intercept.SpawnTicketSigner
+
+func initRisk(dataDir string, policy intercept.PolicyConfig, scoreTool *scoreFunc, evalRisk *evalFunc, revoke *revokeFunc, agentIdentity ...*auth.Identity) {
 	behaviorDB, err := risk.OpenBehaviorDB(dataDir)
 	if err != nil {
 		qlog.Error("failed to open behavior database: %v", err)
@@ -36,14 +50,33 @@ func initRisk(dataDir string, policy intercept.PolicyConfig, scoreTool *scoreFun
 	// Initialize session tracker for preceding action context
 	sessionTracker = risk.NewSessionTracker(20, 0)
 
-	*scoreTool = func(toolName, argsJSON, subjectID, serverName string) *riskResult {
-		s := engine.ScoreToolCall(toolName, argsJSON, subjectID)
+	// Initialize spawn detection and correlation
+	spawnDetector = intercept.NewSpawnDetector(nil)
+	correlationEngine = intercept.NewCorrelationEngine()
 
-		if grpcClient != nil {
-			s = grpcClient.EnhanceScore(s, toolName, argsJSON, subjectID, serverName)
+	// Initialize spawn ticket signer
+	if signer, signerErr := intercept.NewSpawnTicketSigner(0); signerErr != nil {
+		qlog.Warn("failed to initialize spawn ticket signer: %v", signerErr)
+	} else {
+		ticketSigner = signer
+	}
+
+	// Initialize Kafka producer if configured
+	if policy.Kafka != nil && policy.Kafka.Enabled {
+		kafkaProducer = stream.NewProducer(&stream.ProducerConfig{
+			Brokers:     policy.Kafka.Brokers,
+			Enabled:     policy.Kafka.Enabled,
+			Async:       policy.Kafka.Async,
+			BatchSize:   policy.Kafka.BatchSize,
+			BatchTimeMs: policy.Kafka.BatchTimeMs,
+		})
+		if kafkaProducer != nil {
+			cleanupFuncs = append(cleanupFuncs, func() { kafkaProducer.Close() })
 		}
+	}
 
-		// Classify the action and build event context for remote enrichment
+	*scoreTool = func(toolName, argsJSON, subjectID, serverName string) *riskResult {
+		// Classify the action and build event context
 		action := intercept.ClassifyAction(serverName, toolName, "tools/call")
 		var preceding []string
 		if sessionTracker != nil {
@@ -58,6 +91,29 @@ func initRisk(dataDir string, policy intercept.PolicyConfig, scoreTool *scoreFun
 			PrecedingActions: preceding,
 			SessionID:        subjectID,
 			CanonicalAction:  action,
+		}
+		// Populate agent type from identity if available
+		if len(agentIdentity) > 0 && agentIdentity[0] != nil {
+			eventCtx.AgentType = agentIdentity[0].AgentType
+			if eventCtx.AgentID == "" || eventCtx.AgentID == subjectID {
+				eventCtx.AgentID = agentIdentity[0].AgentID
+				eventCtx.AgentName = agentIdentity[0].AgentName
+			}
+		}
+
+		// Agent depth from correlation engine
+		if correlationEngine != nil {
+			eventCtx.Depth = correlationEngine.GetDepth(subjectID)
+			if parent := correlationEngine.GetParent(subjectID); parent != nil {
+				eventCtx.ParentAgentID = parent.ParentAgent
+			}
+		}
+
+		// Use context-aware scoring (includes depth penalty and burst detection)
+		s := engine.ScoreWithContext(toolName, argsJSON, subjectID, eventCtx, sessionTracker)
+
+		if grpcClient != nil {
+			s = grpcClient.EnhanceScore(s, toolName, argsJSON, subjectID, serverName)
 		}
 
 		s = engine.EnhanceWithRemote(s, toolName, argsJSON, subjectID, serverName, eventCtx)
