@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -198,42 +199,37 @@ func runWatch(args []string) {
 		}
 	}
 
-	// Signal handling — coordinated shutdown
+	// Coordinated shutdown (used by both signal handler and error path)
+	var shutdownOnce sync.Once
+	shutdown := func() {
+		shutdownOnce.Do(func() {
+			if heartbeatStop != nil {
+				close(heartbeatStop)
+				<-heartbeatDone
+			}
+			if forwarder != nil {
+				forwarder.Stop()
+			}
+			if apiSrv != nil {
+				apiSrv.Shutdown()
+			}
+			proxy.Close()
+		})
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		<-sigCh
 		qlog.Info("received signal, shutting down...")
-
-		if heartbeatStop != nil {
-			close(heartbeatStop)
-			<-heartbeatDone
-		}
-		if forwarder != nil {
-			forwarder.Stop()
-		}
-
-		if apiSrv != nil {
-			apiSrv.Shutdown()
-		}
-		proxy.Close()
+		shutdown()
 		os.Exit(0)
 	}()
 
 	// Blocking — forward proxy runs in foreground
 	if err := proxy.Start(); err != nil {
 		qlog.Error("forward proxy error: %v", err)
-		if heartbeatStop != nil {
-			close(heartbeatStop)
-			<-heartbeatDone
-		}
-		if forwarder != nil {
-			forwarder.Stop()
-		}
-		if apiSrv != nil {
-			apiSrv.Shutdown()
-		}
-		proxy.Close()
+		shutdown()
 		os.Exit(1)
 	}
 }
