@@ -122,10 +122,23 @@ func (r *IdentityResolver) ResolveForHTTP(remoteAddr, ua, provider string) *auth
 	identity := r.registerWordAgent(provider, cacheKey)
 	if identity != nil {
 		identity.Provider = provider
+		if toolName != "_unknown" {
+			identity.Tool = toolName
+		}
 	}
 
 	r.httpIdentities.Store(cacheKey, identity)
 	return identity
+}
+
+// RotateIdentity updates the httpIdentities cache so that subsequent
+// ResolveForHTTP calls for this cache key return the new identity.
+// Called by the tunnel tracker when a new session is detected after
+// all previous tunnels closed.
+func (r *IdentityResolver) RotateIdentity(cacheKey string, identity *auth.Identity) {
+	if identity != nil {
+		r.httpIdentities.Store(cacheKey, identity)
+	}
 }
 
 // ResolveChild creates a child identity linked to the given parent.
@@ -147,6 +160,7 @@ func (r *IdentityResolver) ResolveChild(parent *auth.Identity, childNum int) *au
 	}
 	identity.Source = "child_detect"
 	identity.Provider = parent.Provider
+	identity.Tool = parent.Tool
 	return identity
 }
 

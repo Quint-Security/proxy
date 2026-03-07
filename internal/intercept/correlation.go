@@ -43,8 +43,10 @@ type AgentRelationship struct {
 // and temporal analysis to maintain the agent relationship graph.
 type CorrelationEngine struct {
 	mu            sync.RWMutex
-	relationships map[string]*AgentRelationship // key: "parent:child"
+	relationships map[string]*AgentRelationship // key: "parent→child"
 	depths        map[string]int                // agentID → tree depth
+	recentSpawns  map[string]time.Time          // key: "parent:tool:pattern" → last seen (dedup)
+	dedupWindow   time.Duration                 // minimum time between duplicate spawn signals
 }
 
 // NewCorrelationEngine creates a new correlation engine.
@@ -52,6 +54,8 @@ func NewCorrelationEngine() *CorrelationEngine {
 	return &CorrelationEngine{
 		relationships: make(map[string]*AgentRelationship),
 		depths:        make(map[string]int),
+		recentSpawns:  make(map[string]time.Time),
+		dedupWindow:   2 * time.Second, // suppress duplicate spawn signals within 2s
 	}
 }
 
@@ -87,15 +91,33 @@ func (ce *CorrelationEngine) AddSignal(signal RelationshipSignal) *AgentRelation
 }
 
 // AddSpawnEvent converts a SpawnEvent into a signal and processes it.
+// Applies temporal deduplication: if the same parent+tool+pattern was seen
+// within the dedup window, the signal is suppressed to prevent miscounting.
+// Returns nil if the event was deduplicated (not a new child).
 func (ce *CorrelationEngine) AddSpawnEvent(event *SpawnEvent) *AgentRelationship {
 	if event == nil {
 		return nil
 	}
 
+	// ChildHint should always be non-empty after DetectSpawn changes,
+	// but keep a fallback for safety.
 	childAgent := event.ChildHint
 	if childAgent == "" {
 		childAgent = fmt.Sprintf("unknown:%s:%s", event.ServerName, event.ToolName)
 	}
+
+	// Temporal deduplication: suppress rapid duplicate signals from the same
+	// parent calling the same tool with the same pattern.
+	dedupKey := fmt.Sprintf("%s:%s:%s", event.ParentAgent, event.ToolName, event.PatternID)
+	ce.mu.Lock()
+	if lastSeen, ok := ce.recentSpawns[dedupKey]; ok {
+		if event.DetectedAt.Sub(lastSeen) < ce.dedupWindow {
+			ce.mu.Unlock()
+			return nil // suppress duplicate
+		}
+	}
+	ce.recentSpawns[dedupKey] = event.DetectedAt
+	ce.mu.Unlock()
 
 	signal := RelationshipSignal{
 		Type:        SignalSpawn,
@@ -225,6 +247,20 @@ func mergeConfidence(existing, new float64) float64 {
 		result = 1.0
 	}
 	return result
+}
+
+// ChildCount returns the number of distinct children for a given parent agent.
+func (ce *CorrelationEngine) ChildCount(parentAgent string) int {
+	ce.mu.RLock()
+	defer ce.mu.RUnlock()
+
+	count := 0
+	for _, rel := range ce.relationships {
+		if rel.ParentAgent == parentAgent {
+			count++
+		}
+	}
+	return count
 }
 
 func relationshipKey(parent, child string) string {

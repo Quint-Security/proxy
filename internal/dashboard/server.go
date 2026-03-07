@@ -17,6 +17,7 @@ import (
 	"github.com/Quint-Security/quint-proxy/internal/audit"
 	"github.com/Quint-Security/quint-proxy/internal/auth"
 	"github.com/Quint-Security/quint-proxy/internal/crypto"
+	"github.com/Quint-Security/quint-proxy/internal/forwardproxy"
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
 )
 
@@ -117,6 +118,7 @@ func (s *Server) buildMux() (*http.ServeMux, error) {
 	mux.HandleFunc("/api/approvals", s.handleApprovals)
 	mux.HandleFunc("/api/approvals/", s.handleApprovalAction)
 	mux.HandleFunc("/api/policy", s.handlePolicy)
+	mux.HandleFunc("/api/providers", s.handleProviders)
 	mux.HandleFunc("/api/events", s.handleSSE)
 
 	// HTTP stream graph
@@ -457,6 +459,34 @@ func (s *Server) handlePolicy(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.jsonErr(w, 405, "use GET")
 	}
+}
+
+// handleProviders returns metadata for all known AI providers (display name, color, icon class).
+func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		s.jsonErr(w, 405, "use GET")
+		return
+	}
+
+	q := r.URL.Query()
+
+	// Optional: look up a single provider by ID
+	if id := q.Get("id"); id != "" {
+		meta := forwardproxy.GetProviderMeta(id)
+		s.json(w, 200, meta)
+		return
+	}
+
+	// Optional: classify a domain
+	if domain := q.Get("domain"); domain != "" {
+		providerID := forwardproxy.InferProvider(domain)
+		meta := forwardproxy.GetProviderMeta(providerID)
+		s.json(w, 200, meta)
+		return
+	}
+
+	// Default: return all providers
+	s.json(w, 200, map[string]any{"providers": forwardproxy.AllProviderMeta()})
 }
 
 // --- SSE Live Updates ---

@@ -41,19 +41,24 @@ func (t *SessionTracker) Record(sessionKey, action string) {
 
 	w, ok := t.sessions[sessionKey]
 	if !ok {
-		w = &actionWindow{}
+		w = &actionWindow{
+			actions: make([]string, 0, t.maxActions),
+			times:   make([]time.Time, 0, t.maxActions),
+		}
 		t.sessions[sessionKey] = w
 	}
 
 	now := time.Now()
-	w.actions = append(w.actions, action)
-	w.times = append(w.times, now)
 
-	// Trim to max size
-	if len(w.actions) > t.maxActions {
-		excess := len(w.actions) - t.maxActions
-		w.actions = w.actions[excess:]
-		w.times = w.times[excess:]
+	// If at capacity, shift in place instead of reslicing (avoids memory leak)
+	if len(w.actions) >= t.maxActions {
+		copy(w.actions, w.actions[1:])
+		copy(w.times, w.times[1:])
+		w.actions[len(w.actions)-1] = action
+		w.times[len(w.times)-1] = now
+	} else {
+		w.actions = append(w.actions, action)
+		w.times = append(w.times, now)
 	}
 }
 
@@ -63,17 +68,26 @@ func (t *SessionTracker) Recent(sessionKey string) []string {
 	defer t.mu.RUnlock()
 
 	w, ok := t.sessions[sessionKey]
-	if !ok {
+	if !ok || len(w.times) == 0 {
 		return nil
 	}
 
 	cutoff := time.Now().Add(-t.windowDuration)
-	var result []string
-	for i, ts := range w.times {
-		if ts.After(cutoff) {
-			result = append(result, w.actions[i])
-		}
+
+	// Find first entry within window (times are ordered)
+	start := 0
+	for start < len(w.times) && !w.times[start].After(cutoff) {
+		start++
 	}
+
+	if start >= len(w.times) {
+		return nil
+	}
+
+	// Return a copy of the relevant slice
+	n := len(w.times) - start
+	result := make([]string, n)
+	copy(result, w.actions[start:])
 	return result
 }
 

@@ -1,6 +1,8 @@
 package intercept
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,13 +26,14 @@ type SpawnPattern struct {
 type SpawnEvent struct {
 	PatternID    string    `json:"pattern_id"`
 	ParentAgent  string    `json:"parent_agent"`
-	ChildHint    string    `json:"child_hint"`    // extracted child agent identifier if available
+	ChildHint    string    `json:"child_hint"`    // extracted child agent identifier (always non-empty)
 	SpawnType    string    `json:"spawn_type"`     // "direct", "delegation", "fork"
 	Confidence   float64   `json:"confidence"`     // 0.0-1.0
 	ToolName     string    `json:"tool_name"`
 	ServerName   string    `json:"server_name"`
 	DetectedAt   time.Time `json:"detected_at"`
 	ArgumentsRef string    `json:"arguments_ref"`  // hash or truncated args for correlation
+	Framework    string    `json:"framework,omitempty"` // detected agent framework (e.g., "openai", "claude", "langchain")
 }
 
 // SpawnDetector detects agent spawn events from tool calls.
@@ -45,9 +48,13 @@ type compiledSpawnPattern struct {
 	argRegexs []*regexp.Regexp
 }
 
-// DefaultSpawnPatterns returns the built-in spawn patterns.
+// DefaultSpawnPatterns returns the built-in spawn patterns covering the top
+// agent frameworks: OpenAI Agents SDK, Claude/Anthropic, Codex, Gemini,
+// LangChain/LangGraph, CrewAI, AutoGen, Semantic Kernel, AWS Bedrock,
+// Vertex AI, GitHub Copilot, and generic A2A patterns.
 func DefaultSpawnPatterns() []SpawnPattern {
 	return []SpawnPattern{
+		// --- OpenAI Agents SDK ---
 		{
 			ID:          "openai-handoff",
 			Description: "OpenAI Agents SDK transfer/handoff to another agent",
@@ -56,6 +63,340 @@ func DefaultSpawnPatterns() []SpawnPattern {
 			Confidence:  0.90,
 			SpawnType:   "delegation",
 		},
+
+		// --- Claude / Anthropic ---
+		{
+			ID:          "claude-agent-tool",
+			Description: "Claude Code Agent tool delegation",
+			ToolPattern: "Agent",
+			ArgPatterns: []string{`"prompt"`, `"subagent"`, `"task"`},
+			Confidence:  0.85,
+			SpawnType:   "delegation",
+		},
+		{
+			ID:          "claude-subagent",
+			Description: "Claude Code sub-agent invocation",
+			ToolPattern: "*subagent*",
+			ArgPatterns: []string{},
+			Confidence:  0.85,
+			SpawnType:   "direct",
+		},
+
+		// --- OpenAI Codex ---
+		{
+			ID:          "codex-spawn",
+			Description: "Codex CLI agent spawn via exec or subprocess",
+			ToolPattern: "*codex*",
+			ArgPatterns: []string{`"agent"`, `"run"`, `"execute"`},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+
+		// --- Google Gemini / Vertex AI ---
+		{
+			ID:          "gemini-function-call",
+			Description: "Gemini agent delegation via function calling",
+			ToolPattern: "*gemini*",
+			ArgPatterns: []string{`"agent"`, `"delegate"`, `"function_call"`},
+			Confidence:  0.80,
+			SpawnType:   "delegation",
+		},
+		{
+			ID:          "vertex-agent-builder",
+			Description: "Vertex AI Agent Builder task dispatch",
+			ToolPattern: "*dispatch*agent*",
+			ArgPatterns: []string{},
+			Confidence:  0.85,
+			SpawnType:   "direct",
+		},
+
+		// --- LangChain / LangGraph ---
+		{
+			ID:          "langchain-agent-executor",
+			Description: "LangChain AgentExecutor or chain delegation",
+			ToolPattern: "*agent_executor*",
+			ArgPatterns: []string{},
+			Confidence:  0.85,
+			SpawnType:   "direct",
+		},
+		{
+			ID:          "langgraph-handoff",
+			Description: "LangGraph node-to-node agent handoff",
+			ToolPattern: "*handoff*",
+			ArgPatterns: []string{`"agent"`, `"node"`, `"target"`},
+			Confidence:  0.80,
+			SpawnType:   "delegation",
+		},
+
+		// --- CrewAI ---
+		{
+			ID:          "crewai-delegate",
+			Description: "CrewAI delegate_work or ask_question to crew member",
+			ToolPattern: "*delegate_work*",
+			ArgPatterns: []string{},
+			Confidence:  0.90,
+			SpawnType:   "delegation",
+		},
+		{
+			ID:          "crewai-coworker",
+			Description: "CrewAI coworker/crew member invocation",
+			ToolPattern: "*ask_question*",
+			ArgPatterns: []string{`"coworker"`, `"crew"`},
+			Confidence:  0.80,
+			SpawnType:   "delegation",
+		},
+
+		// --- Microsoft AutoGen ---
+		{
+			ID:          "autogen-initiate-chat",
+			Description: "AutoGen agent initiate_chat or generate_reply",
+			ToolPattern: "*initiate_chat*",
+			ArgPatterns: []string{},
+			Confidence:  0.85,
+			SpawnType:   "delegation",
+		},
+		{
+			ID:          "autogen-groupchat",
+			Description: "AutoGen GroupChat agent spawn",
+			ToolPattern: "*group_chat*",
+			ArgPatterns: []string{`"agent"`, `"agents"`},
+			Confidence:  0.80,
+			SpawnType:   "direct",
+		},
+
+		// --- Microsoft Semantic Kernel ---
+		{
+			ID:          "semantic-kernel-invoke",
+			Description: "Semantic Kernel agent/plugin invocation",
+			ToolPattern: "*invoke*plugin*",
+			ArgPatterns: []string{},
+			Confidence:  0.80,
+			SpawnType:   "direct",
+		},
+
+		// --- AWS Bedrock Agents ---
+		{
+			ID:          "bedrock-invoke-agent",
+			Description: "AWS Bedrock InvokeAgent API",
+			ToolPattern: "*invoke*agent*",
+			ArgPatterns: []string{},
+			Confidence:  0.85,
+			SpawnType:   "direct",
+		},
+		{
+			ID:          "bedrock-action-group",
+			Description: "AWS Bedrock action group execution with agent delegation",
+			ToolPattern: "*action_group*",
+			ArgPatterns: []string{`"agent"`, `"invoke"`},
+			Confidence:  0.75,
+			SpawnType:   "delegation",
+		},
+
+		// --- GitHub Copilot ---
+		{
+			ID:          "copilot-agent",
+			Description: "GitHub Copilot agent/extension invocation",
+			ToolPattern: "*copilot*",
+			ArgPatterns: []string{`"agent"`, `"extension"`, `"skill"`},
+			Confidence:  0.75,
+			SpawnType:   "delegation",
+		},
+
+		// --- Cursor IDE ---
+		{
+			ID:          "cursor-agent",
+			Description: "Cursor IDE agent tool invocation",
+			ToolPattern: "*cursor*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"run"`},
+			Confidence:  0.80,
+			SpawnType:   "delegation",
+		},
+		{
+			ID:          "cursor-terminal",
+			Description: "Cursor run_terminal_command spawning agent processes",
+			ToolPattern: "*run_terminal*",
+			ArgPatterns: []string{`claude`, `codex`, `gemini`, `aider`, `agent`, `copilot`},
+			Confidence:  0.75,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "cursor-composer",
+			Description: "Cursor Composer multi-file agent delegation",
+			ToolPattern: "*composer*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"apply"`},
+			Confidence:  0.75,
+			SpawnType:   "delegation",
+		},
+
+		// --- Windsurf / Codeium (Cascade) ---
+		{
+			ID:          "windsurf-cascade",
+			Description: "Windsurf Cascade agent delegation",
+			ToolPattern: "*cascade*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"step"`},
+			Confidence:  0.80,
+			SpawnType:   "delegation",
+		},
+		{
+			ID:          "windsurf-command",
+			Description: "Windsurf/Codeium run_command spawning agents",
+			ToolPattern: "*windsurf*",
+			ArgPatterns: []string{`"agent"`, `"run"`, `"execute"`},
+			Confidence:  0.75,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "codeium-agent",
+			Description: "Codeium agent/extension invocation",
+			ToolPattern: "*codeium*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"run"`},
+			Confidence:  0.75,
+			SpawnType:   "delegation",
+		},
+
+		// --- Aider ---
+		{
+			ID:          "aider-spawn",
+			Description: "Aider CLI agent spawn",
+			ToolPattern: "*aider*",
+			ArgPatterns: []string{},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+
+		// --- Continue.dev ---
+		{
+			ID:          "continue-agent",
+			Description: "Continue.dev agent delegation",
+			ToolPattern: "*continue*",
+			ArgPatterns: []string{`"agent"`, `"model"`, `"task"`},
+			Confidence:  0.70,
+			SpawnType:   "delegation",
+		},
+
+		// --- Cline / Roo Code ---
+		{
+			ID:          "cline-command",
+			Description: "Cline execute_command spawning agent processes",
+			ToolPattern: "*cline*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"execute"`},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "roo-code-agent",
+			Description: "Roo Code agent delegation",
+			ToolPattern: "*roo*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"mode"`},
+			Confidence:  0.75,
+			SpawnType:   "delegation",
+		},
+
+		// --- Devin (Cognition) ---
+		{
+			ID:          "devin-task",
+			Description: "Devin autonomous agent task delegation",
+			ToolPattern: "*devin*",
+			ArgPatterns: []string{`"task"`, `"agent"`, `"plan"`},
+			Confidence:  0.85,
+			SpawnType:   "delegation",
+		},
+
+		// --- SWE-agent (Princeton) ---
+		{
+			ID:          "swe-agent-spawn",
+			Description: "SWE-agent subprocess spawning",
+			ToolPattern: "*swe*agent*",
+			ArgPatterns: []string{},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+
+		// --- Amazon Q Developer ---
+		{
+			ID:          "amazon-q-agent",
+			Description: "Amazon Q Developer agent invocation",
+			ToolPattern: "*amazon*q*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"transform"`},
+			Confidence:  0.80,
+			SpawnType:   "delegation",
+		},
+		{
+			ID:          "q-developer-cli",
+			Description: "Amazon Q Developer CLI agent",
+			ToolPattern: "*q_developer*",
+			ArgPatterns: []string{},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+
+		// --- JetBrains AI / Junie ---
+		{
+			ID:          "junie-agent",
+			Description: "JetBrains Junie autonomous agent",
+			ToolPattern: "*junie*",
+			ArgPatterns: []string{},
+			Confidence:  0.80,
+			SpawnType:   "delegation",
+		},
+		{
+			ID:          "jetbrains-ai-agent",
+			Description: "JetBrains AI assistant agent delegation",
+			ToolPattern: "*jetbrains*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"action"`},
+			Confidence:  0.75,
+			SpawnType:   "delegation",
+		},
+
+		// --- Bolt.new / Lovable / v0 (web-based AI builders) ---
+		{
+			ID:          "bolt-agent",
+			Description: "Bolt.new autonomous coding agent",
+			ToolPattern: "*bolt*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"generate"`},
+			Confidence:  0.70,
+			SpawnType:   "delegation",
+		},
+		{
+			ID:          "lovable-agent",
+			Description: "Lovable autonomous coding agent",
+			ToolPattern: "*lovable*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"build"`},
+			Confidence:  0.70,
+			SpawnType:   "delegation",
+		},
+
+		// --- Tabnine ---
+		{
+			ID:          "tabnine-agent",
+			Description: "Tabnine agent mode invocation",
+			ToolPattern: "*tabnine*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"action"`},
+			Confidence:  0.75,
+			SpawnType:   "delegation",
+		},
+
+		// --- Augment Code ---
+		{
+			ID:          "augment-agent",
+			Description: "Augment Code agent delegation",
+			ToolPattern: "*augment*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"action"`},
+			Confidence:  0.75,
+			SpawnType:   "delegation",
+		},
+
+		// --- Sourcegraph Cody ---
+		{
+			ID:          "cody-agent",
+			Description: "Sourcegraph Cody agent delegation",
+			ToolPattern: "*cody*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"command"`},
+			Confidence:  0.75,
+			SpawnType:   "delegation",
+		},
+
+		// --- Generic patterns (lower confidence, catch-all) ---
 		{
 			ID:          "generic-create-agent",
 			Description: "Generic agent creation tool calls",
@@ -72,14 +413,135 @@ func DefaultSpawnPatterns() []SpawnPattern {
 			Confidence:  0.75,
 			SpawnType:   "delegation",
 		},
+
+		// --- Real-world shell/subprocess patterns ---
+		// Agents use generic tool names (Bash, shell, run, cmd, terminal)
+		// with framework-specific commands in the arguments.
+		{
+			ID:          "bash-agent-spawn",
+			Description: "Bash tool launching agent processes (Claude Code, etc.)",
+			ToolPattern: "*bash*",
+			ArgPatterns: []string{`claude`, `codex`, `gemini`, `gpt`, `anthropic`, `openai`, `agent`, `llm`, `copilot`, `cursor`, `windsurf`, `aider`, `cline`, `devin`, `swe-agent`, `junie`},
+			Confidence:  0.75,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "shell-tool-spawn",
+			Description: "Shell tool launching agent processes",
+			ToolPattern: "*shell*",
+			ArgPatterns: []string{`claude`, `codex`, `gemini`, `gpt`, `anthropic`, `openai`, `agent`, `llm`, `copilot`, `cursor`, `windsurf`, `aider`, `cline`, `devin`, `swe-agent`, `junie`},
+			Confidence:  0.75,
+			SpawnType:   "fork",
+		},
 		{
 			ID:          "shell-agent-spawn",
 			Description: "Shell/exec tools launching agent processes",
 			ToolPattern: "*exec*",
-			ArgPatterns: []string{`agent`, `assistant`, `claude`, `gpt`, `llm`},
+			ArgPatterns: []string{`agent`, `assistant`, `claude`, `gpt`, `llm`, `codex`, `gemini`, `copilot`, `cursor`, `windsurf`, `aider`, `cline`, `devin`, `swe-agent`, `junie`},
 			Confidence:  0.70,
 			SpawnType:   "fork",
 		},
+		{
+			ID:          "terminal-agent-spawn",
+			Description: "Terminal/console tool launching agent processes",
+			ToolPattern: "*terminal*",
+			ArgPatterns: []string{`claude`, `codex`, `gemini`, `gpt`, `anthropic`, `openai`, `agent`, `llm`, `copilot`, `cursor`, `windsurf`, `aider`, `cline`, `devin`, `swe-agent`, `junie`},
+			Confidence:  0.70,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "cmd-agent-spawn",
+			Description: "Command tool launching agent processes",
+			ToolPattern: "*command*",
+			ArgPatterns: []string{`claude`, `codex`, `gemini`, `gpt`, `anthropic`, `openai`, `agent`, `llm`, `copilot`, `cursor`, `windsurf`, `aider`, `cline`, `devin`, `swe-agent`, `junie`},
+			Confidence:  0.70,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "subprocess-agent",
+			Description: "Subprocess/spawn launching agent processes",
+			ToolPattern: "*spawn*",
+			ArgPatterns: []string{`agent`, `assistant`, `claude`, `gpt`, `llm`, `codex`, `gemini`, `copilot`, `cursor`, `windsurf`, `aider`, `cline`, `devin`, `swe-agent`, `junie`},
+			Confidence:  0.70,
+			SpawnType:   "fork",
+		},
+
+		// --- Framework-specific CLI spawning via any tool ---
+		// Detects when any tool (including wildcards) runs a specific
+		// framework's CLI command as a subprocess.
+		{
+			ID:          "claude-cli-spawn",
+			Description: "Any tool spawning Claude CLI as subprocess",
+			ToolPattern: "*",
+			ArgPatterns: []string{`"claude "`, `"claude\n`, `claude code`, `claude agent`, `npx @anthropic`},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "codex-cli-spawn",
+			Description: "Any tool spawning Codex CLI as subprocess",
+			ToolPattern: "*",
+			ArgPatterns: []string{`"codex "`, `"codex\n`, `codex agent`, `codex run`, `npx codex`},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "gemini-cli-spawn",
+			Description: "Any tool spawning Gemini CLI as subprocess",
+			ToolPattern: "*",
+			ArgPatterns: []string{`"gemini "`, `"gemini\n`, `gemini agent`, `gemini run`, `npx @google`},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "aider-cli-spawn",
+			Description: "Any tool spawning Aider CLI as subprocess",
+			ToolPattern: "*",
+			ArgPatterns: []string{`"aider "`, `"aider\n`, `aider --model`, `aider --yes`},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "cursor-cli-spawn",
+			Description: "Any tool spawning Cursor agent as subprocess",
+			ToolPattern: "*",
+			ArgPatterns: []string{`cursor agent`, `cursor --agent`, `cursor composer`},
+			Confidence:  0.75,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "devin-cli-spawn",
+			Description: "Any tool spawning Devin as subprocess",
+			ToolPattern: "*",
+			ArgPatterns: []string{`devin run`, `devin agent`, `devin task`},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "swe-agent-cli-spawn",
+			Description: "Any tool spawning SWE-agent as subprocess",
+			ToolPattern: "*",
+			ArgPatterns: []string{`swe-agent`, `sweagent`, `python -m swe`},
+			Confidence:  0.75,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "amazon-q-cli-spawn",
+			Description: "Any tool spawning Amazon Q CLI as subprocess",
+			ToolPattern: "*",
+			ArgPatterns: []string{`"q "`, `q chat`, `q dev`, `amazon-q`},
+			Confidence:  0.75,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "interpreter-agent-spawn",
+			Description: "Python/Node interpreter launching agent scripts",
+			ToolPattern: "*",
+			ArgPatterns: []string{`python agent`, `python -m agent`, `node agent`, `npx agent`, `python claude`, `python codex`, `python gemini`},
+			Confidence:  0.65,
+			SpawnType:   "fork",
+		},
+
 		{
 			ID:          "subtask-spawn",
 			Description: "Task decomposition and subtask delegation",
@@ -149,6 +611,9 @@ func NewSpawnDetector(patterns []SpawnPattern) *SpawnDetector {
 
 // DetectSpawn checks if a tool call looks like an agent spawn.
 // Returns nil if no spawn pattern matches.
+// When a spawn is detected but no explicit child identity is found,
+// a deterministic child ID is generated from the call content to prevent
+// conflation of distinct children.
 func (d *SpawnDetector) DetectSpawn(serverName, toolName, argsJSON, parentAgent string) *SpawnEvent {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -160,6 +625,17 @@ func (d *SpawnDetector) DetectSpawn(serverName, toolName, argsJSON, parentAgent 
 
 		childHint := extractChildHint(toolName, argsJSON)
 
+		// Generate deterministic child ID when no explicit hint is available.
+		// This prevents multiple distinct children from being conflated into
+		// a single "unknown:server:tool" relationship.
+		if childHint == "" {
+			childHint = fmt.Sprintf("child:%s:%s:%s",
+				serverName, toolName, deterministicChildID(serverName, toolName, argsJSON))
+		}
+
+		// Detect framework from pattern and args
+		framework := inferFramework(p.ID, toolName, argsJSON)
+
 		return &SpawnEvent{
 			PatternID:    p.ID,
 			ParentAgent:  parentAgent,
@@ -170,6 +646,7 @@ func (d *SpawnDetector) DetectSpawn(serverName, toolName, argsJSON, parentAgent 
 			ServerName:   serverName,
 			DetectedAt:   time.Now(),
 			ArgumentsRef: truncateArgs(argsJSON, 256),
+			Framework:    framework,
 		}
 	}
 
@@ -224,26 +701,187 @@ func LoadSpawnPatterns(path string) []SpawnPattern {
 }
 
 // extractChildHint tries to identify the child agent from tool name or arguments.
+// Returns a non-empty string in all cases to prevent child conflation.
+// When no explicit child identity is found, generates a deterministic ID from
+// the tool call content so distinct calls produce distinct children.
 func extractChildHint(toolName, argsJSON string) string {
 	// Pattern: transfer_to_<agent_name>
-	if strings.HasPrefix(strings.ToLower(toolName), "transfer_to_") {
-		return strings.TrimPrefix(strings.ToLower(toolName), "transfer_to_")
+	lower := strings.ToLower(toolName)
+	if strings.HasPrefix(lower, "transfer_to_") {
+		return strings.TrimPrefix(lower, "transfer_to_")
 	}
 
-	// Try to extract from common argument fields
-	if argsJSON == "" {
-		return ""
+	// Pattern: delegate_work_to_<agent>
+	if strings.HasPrefix(lower, "delegate_work_to_") {
+		return strings.TrimPrefix(lower, "delegate_work_to_")
 	}
 
-	var args map[string]any
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return ""
+	// Try to extract from common argument fields (expanded for framework coverage)
+	if argsJSON != "" {
+		var args map[string]any
+		if err := json.Unmarshal([]byte(argsJSON), &args); err == nil {
+			// Check nested objects first: args.agent.name, args.agent.id
+			// (must come before top-level "agent" check to avoid stringifying a map)
+			if agentObj, ok := args["agent"].(map[string]any); ok {
+				for _, sub := range []string{"name", "id", "agent_id"} {
+					if v, ok := agentObj[sub]; ok {
+						s := fmt.Sprintf("%v", v)
+						if s != "" && s != "<nil>" {
+							return s
+						}
+					}
+				}
+			}
+
+			// Priority-ordered list of keys that identify the child agent
+			for _, key := range []string{
+				"agent", "agent_name", "agent_id",
+				"assistant", "assistant_id", "assistant_name",
+				"target_agent", "delegate_to", "recipient",
+				"coworker",                 // CrewAI
+				"node", "target_node",      // LangGraph
+				"agentId", "agentName",     // Bedrock
+				"model", "model_id",        // generic model-based agents
+				"skill", "extension",       // Copilot
+				"subagent_type",            // Claude Code
+			} {
+				if v, ok := args[key]; ok {
+					// Skip map/slice values — they need nested extraction
+					switch v.(type) {
+					case map[string]any, []any:
+						continue
+					}
+					s := fmt.Sprintf("%v", v)
+					if s != "" && s != "<nil>" {
+						return s
+					}
+				}
+			}
+		}
 	}
 
-	// Check common field names for child agent identifiers
-	for _, key := range []string{"agent", "agent_name", "agent_id", "assistant", "assistant_id", "target_agent", "delegate_to"} {
-		if v, ok := args[key]; ok {
-			return fmt.Sprintf("%v", v)
+	return ""
+}
+
+// deterministicChildID generates a short deterministic ID from the tool call
+// content. Two calls with identical tool+args produce the same ID; different
+// args produce different IDs. This prevents conflation of distinct children
+// that lack an explicit child hint.
+func deterministicChildID(serverName, toolName, argsJSON string) string {
+	h := sha256.New()
+	h.Write([]byte(serverName))
+	h.Write([]byte{0})
+	h.Write([]byte(toolName))
+	h.Write([]byte{0})
+	h.Write([]byte(argsJSON))
+	return hex.EncodeToString(h.Sum(nil))[:12]
+}
+
+// inferFramework identifies the agent framework from the spawn pattern ID,
+// tool name, and argument signatures. Returns empty string if unknown.
+func inferFramework(patternID, toolName, argsJSON string) string {
+	// Direct mapping from pattern IDs to frameworks
+	patternFrameworks := map[string]string{
+		// Core AI providers
+		"openai-handoff":           "openai",
+		"claude-agent-tool":        "claude",
+		"claude-subagent":          "claude",
+		"claude-cli-spawn":         "claude",
+		"codex-spawn":              "codex",
+		"codex-cli-spawn":          "codex",
+		"gemini-function-call":     "gemini",
+		"gemini-cli-spawn":         "gemini",
+		"vertex-agent-builder":     "vertex-ai",
+		// Agent frameworks
+		"langchain-agent-executor": "langchain",
+		"langgraph-handoff":        "langgraph",
+		"crewai-delegate":          "crewai",
+		"crewai-coworker":          "crewai",
+		"autogen-initiate-chat":    "autogen",
+		"autogen-groupchat":        "autogen",
+		"semantic-kernel-invoke":   "semantic-kernel",
+		"bedrock-invoke-agent":     "bedrock",
+		"bedrock-action-group":     "bedrock",
+		"copilot-agent":            "copilot",
+		"a2a-delegation":           "a2a",
+		// Coding IDEs
+		"cursor-agent":             "cursor",
+		"cursor-terminal":          "cursor",
+		"cursor-composer":          "cursor",
+		"cursor-cli-spawn":         "cursor",
+		"windsurf-cascade":         "windsurf",
+		"windsurf-command":         "windsurf",
+		"codeium-agent":            "codeium",
+		"aider-spawn":              "aider",
+		"aider-cli-spawn":          "aider",
+		"continue-agent":           "continue",
+		"cline-command":            "cline",
+		"roo-code-agent":           "roo-code",
+		// AI dev tools
+		"devin-task":               "devin",
+		"devin-cli-spawn":          "devin",
+		"swe-agent-spawn":          "swe-agent",
+		"swe-agent-cli-spawn":      "swe-agent",
+		"amazon-q-agent":           "amazon-q",
+		"q-developer-cli":          "amazon-q",
+		"amazon-q-cli-spawn":       "amazon-q",
+		"junie-agent":              "junie",
+		"jetbrains-ai-agent":       "jetbrains",
+		"bolt-agent":               "bolt",
+		"lovable-agent":            "lovable",
+		"tabnine-agent":            "tabnine",
+		"augment-agent":            "augment",
+		"cody-agent":               "cody",
+	}
+	if fw, ok := patternFrameworks[patternID]; ok {
+		return fw
+	}
+
+	// Fallback: detect from tool name or args for generic patterns
+	lower := strings.ToLower(toolName)
+	argLower := strings.ToLower(argsJSON)
+
+	frameworkSignals := []struct {
+		keywords  []string
+		framework string
+	}{
+		// Core AI providers
+		{[]string{"claude", "anthropic"}, "claude"},
+		{[]string{"openai", "gpt", "chatgpt"}, "openai"},
+		{[]string{"codex"}, "codex"},
+		{[]string{"gemini", "google_ai"}, "gemini"},
+		// Agent frameworks
+		{[]string{"langchain", "langgraph"}, "langchain"},
+		{[]string{"crewai", "crew_ai", "coworker"}, "crewai"},
+		{[]string{"autogen", "auto_gen"}, "autogen"},
+		{[]string{"semantic_kernel"}, "semantic-kernel"},
+		{[]string{"bedrock"}, "bedrock"},
+		{[]string{"vertex"}, "vertex-ai"},
+		{[]string{"copilot"}, "copilot"},
+		// Coding IDEs
+		{[]string{"cursor"}, "cursor"},
+		{[]string{"windsurf", "cascade"}, "windsurf"},
+		{[]string{"codeium"}, "codeium"},
+		{[]string{"aider"}, "aider"},
+		{[]string{"cline"}, "cline"},
+		{[]string{"roo_code", "roo-code"}, "roo-code"},
+		// AI dev tools
+		{[]string{"devin"}, "devin"},
+		{[]string{"swe-agent", "sweagent"}, "swe-agent"},
+		{[]string{"amazon_q", "amazon-q"}, "amazon-q"},
+		{[]string{"junie"}, "junie"},
+		{[]string{"jetbrains"}, "jetbrains"},
+		{[]string{"tabnine"}, "tabnine"},
+		{[]string{"augment"}, "augment"},
+		{[]string{"cody", "sourcegraph"}, "cody"},
+	}
+
+	combined := lower + " " + argLower
+	for _, fs := range frameworkSignals {
+		for _, kw := range fs.keywords {
+			if strings.Contains(combined, kw) {
+				return fs.framework
+			}
 		}
 	}
 

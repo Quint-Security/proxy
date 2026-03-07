@@ -30,4 +30,5 @@ type Identity struct {
 	// Provider detection (forward proxy mode)
 	Provider string // "anthropic", "openai", "google", etc.
 	Model    string // Last observed model: "claude-sonnet-4-20250514", "gpt-4o", etc.
+	Tool     string // Client tool: "claude-code", "cursor", "aider", etc.
 }

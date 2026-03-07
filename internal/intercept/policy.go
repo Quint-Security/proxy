@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/Quint-Security/quint-proxy/internal/crypto"
@@ -248,22 +247,46 @@ func ResolveDataDir(raw string) string {
 }
 
 // GlobMatch matches a string against a pattern with * (any chars) and ? (single char).
-// This matches the TypeScript implementation exactly.
+// Uses a fast recursive algorithm instead of compiling a regex on every call.
 func GlobMatch(pattern, value string) bool {
-	if pattern == value || pattern == "*" {
-		return true
-	}
+	return globMatch(pattern, value)
+}
 
-	// Escape regex special chars, then convert glob wildcards
-	escaped := regexp.QuoteMeta(pattern)
-	escaped = strings.ReplaceAll(escaped, `\*`, ".*")
-	escaped = strings.ReplaceAll(escaped, `\?`, ".")
-
-	re, err := regexp.Compile("^" + escaped + "$")
-	if err != nil {
-		return pattern == value
+// globMatch implements glob matching without regex compilation.
+// Handles *, ?, and literal characters.
+func globMatch(pattern, str string) bool {
+	for len(pattern) > 0 {
+		switch pattern[0] {
+		case '*':
+			// Skip consecutive *s
+			for len(pattern) > 0 && pattern[0] == '*' {
+				pattern = pattern[1:]
+			}
+			if len(pattern) == 0 {
+				return true // trailing * matches everything
+			}
+			// Try matching the rest of the pattern at every position
+			for i := 0; i <= len(str); i++ {
+				if globMatch(pattern, str[i:]) {
+					return true
+				}
+			}
+			return false
+		case '?':
+			if len(str) == 0 {
+				return false
+			}
+			pattern = pattern[1:]
+			str = str[1:]
+		default:
+			if len(str) == 0 || pattern[0] != str[0] {
+				return false
+			}
+			pattern = pattern[1:]
+			str = str[1:]
+		}
 	}
-	return re.MatchString(value)
+	return len(str) == 0
 }
 
 // EvaluatePolicy determines the verdict for a tool call on a server.

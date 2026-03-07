@@ -418,8 +418,8 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 			if g.correlationEngine != nil {
 				rel := g.correlationEngine.AddSpawnEvent(spawnEvent)
 				if rel != nil {
-					qlog.Info("relationship updated: %s→%s (confidence=%.2f, depth=%d)",
-						rel.ParentAgent, rel.ChildAgent, rel.Confidence, rel.Depth)
+					qlog.Info("relationship updated: %s→%s (confidence=%.2f, depth=%d, framework=%s)",
+						rel.ParentAgent, rel.ChildAgent, rel.Confidence, rel.Depth, spawnEvent.Framework)
 
 					// Persist to audit DB
 					if g.logger != nil {
@@ -440,6 +440,21 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 						})
 					}
 				}
+			}
+
+			// Persist spawn event to audit DB (was previously missing)
+			if g.logger != nil {
+				g.logger.RecordSpawnEvent(
+					spawnEvent.DetectedAt.Format(time.RFC3339),
+					spawnEvent.PatternID,
+					spawnEvent.ParentAgent,
+					spawnEvent.ChildHint,
+					spawnEvent.SpawnType,
+					spawnEvent.ToolName,
+					spawnEvent.ServerName,
+					spawnEvent.ArgumentsRef,
+					spawnEvent.Confidence,
+				)
 			}
 
 			// Publish spawn event to Kafka
@@ -752,11 +767,23 @@ func splitNamespacedTool(name string) (backend, tool string) {
 }
 
 func escapeJSON(s string) string {
-	// Use json.Marshal to properly escape all special characters
+	// Fast path: check if escaping is needed at all
+	needsEscape := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '"' || c == '\\' || c < 0x20 {
+			needsEscape = true
+			break
+		}
+	}
+	if !needsEscape {
+		return s
+	}
+
+	// Use json.Marshal for strings that actually need escaping
 	b, err := json.Marshal(s)
 	if err != nil {
 		return s
 	}
-	// Strip the surrounding quotes that Marshal adds
 	return string(b[1 : len(b)-1])
 }

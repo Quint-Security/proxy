@@ -7,19 +7,25 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	qlog "github.com/Quint-Security/quint-proxy/internal/log"
 )
 
+// bufPool reuses byte buffers for JSON marshaling to reduce GC pressure.
+var bufPool = sync.Pool{
+	New: func() any {
+		return bytes.NewBuffer(make([]byte, 0, 2048))
+	},
+}
+
+// sanitizeReplacer performs single-pass character replacement for taxonomy format.
+var sanitizeReplacer = strings.NewReplacer(":", "_", "-", "_", " ", "_", "/", "_")
+
 // sanitize replaces characters that break the action taxonomy format.
 func sanitize(s string) string {
-	s = strings.ToLower(s)
-	s = strings.ReplaceAll(s, ":", "_")
-	s = strings.ReplaceAll(s, "-", "_")
-	s = strings.ReplaceAll(s, " ", "_")
-	s = strings.ReplaceAll(s, "/", "_")
-	return s
+	return sanitizeReplacer.Replace(strings.ToLower(s))
 }
 
 // RemoteConfig configures the remote risk scoring API.
@@ -214,11 +220,25 @@ func (r *RemoteScorer) EnhanceScore(localScore Score, toolName, argsJSON, subjec
 		}
 	}
 
-	body, _ := json.Marshal(req)
+	buf := bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	enc := json.NewEncoder(buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(req); err != nil {
+		bufPool.Put(buf)
+		qlog.Debug("remote risk: failed to encode request: %v", err)
+		return localScore
+	}
+	// Encode adds a trailing newline; trim it for the HTTP body
+	body := buf.Bytes()
+	if len(body) > 0 && body[len(body)-1] == '\n' {
+		body = body[:len(body)-1]
+	}
 
 	qlog.Info("remote risk API request: %s", string(body))
 
 	httpReq, err := http.NewRequest("POST", r.config.URL+"/events", bytes.NewReader(body))
+	bufPool.Put(buf) // return buffer after creating the reader
 	if err != nil {
 		qlog.Debug("remote risk: failed to create request: %v", err)
 		return localScore

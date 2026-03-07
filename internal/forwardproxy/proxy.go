@@ -75,12 +75,13 @@ type tunnelTracker struct {
 }
 
 type ipTunnelState struct {
-	activeTunnels int                // total active tunnels from this key
-	lastConnect   time.Time          // last CONNECT timestamp
-	parentID      *auth.Identity     // the key's primary (first) identity
-	currentID     *auth.Identity     // the identity assigned to the latest burst
-	childCount    int                // children spawned (with parent trace)
-	peerCount     int                // independent instances spawned (no parent trace)
+	activeTunnels  int                // total active tunnels from this key
+	lastConnect    time.Time          // last CONNECT timestamp
+	sessionEndTime time.Time          // when activeTunnels last dropped to 0
+	parentID       *auth.Identity     // the key's primary (first) identity
+	currentID      *auth.Identity     // the identity assigned to the latest burst
+	childCount     int                // children spawned (with parent trace)
+	peerCount      int                // independent instances spawned (no parent trace)
 
 	// Concurrency baseline tracking — detects sub-agents that open tunnels
 	// while the parent is still active (e.g. Claude Code Task tool).
@@ -157,6 +158,46 @@ func (t *tunnelTracker) resolve(key string, resolved *auth.Identity, resolver *I
 	gap := now.Sub(state.lastConnect)
 	burstWindow := time.Duration(t.burstWindowMS) * time.Millisecond
 
+	// Phase A0: New session detection — all tunnels were closed and enough
+	// time has passed since the session ended. This is a genuinely new
+	// session (e.g. user closed Claude Code and opened a new one), not a
+	// rapid reconnect from connection pooling.
+	if state.activeTunnels == 0 && !state.sessionEndTime.IsZero() {
+		sessionGap := now.Sub(state.sessionEndTime)
+		if sessionGap > burstWindow {
+			// New session from same IP+tool+provider — create a fresh peer identity
+			// and reset the tracker state so this session gets its own baseline.
+			state.peerCount++
+			peerSeed := fmt.Sprintf("%s:session:%d", key, state.peerCount)
+			newAgent := resolver.ResolveFromHeaders(ua, "", peerSeed)
+			if newAgent != nil {
+				qlog.Info("tunnel: new session from %s → %s (session #%d, gap=%v since last session ended)",
+					key, newAgent.AgentName, state.peerCount+1, sessionGap)
+			}
+
+			// Update the httpIdentities cache so subsequent ResolveForHTTP
+			// calls within this session return the new identity.
+			resolver.RotateIdentity(key, newAgent)
+
+			// Reset state for the new session
+			state.parentID = newAgent
+			state.currentID = newAgent
+			state.firstConnect = now
+			state.peakTunnels = 1
+			state.baselineSet = false
+			state.baseline = 0
+			state.childCount = 0
+			state.pendingChildren = nil
+			state.splitTunnels = nil
+			state.sessionEndTime = time.Time{}
+			state.activeTunnels = 1
+			state.lastConnect = now
+			return newAgent, "", true
+		}
+		// Rapid reconnect after session close (within burst window) —
+		// same session resuming, reuse current identity.
+	}
+
 	// Phase A: Temporal gap detection (preserves existing sequential handoff behavior).
 	// A gap > burstWindow while tunnels are still active means a new process connected.
 	if gap > burstWindow && state.activeTunnels > 0 {
@@ -222,11 +263,6 @@ func (t *tunnelTracker) resolve(key string, resolved *auth.Identity, resolver *I
 	}
 	state.lastConnect = now
 
-	if state.activeTunnels == 0 {
-		// Reconnecting after all tunnels closed — reuse parent
-		state.currentID = state.parentID
-	}
-
 	return state.currentID, "", false
 }
 
@@ -291,10 +327,11 @@ func (t *tunnelTracker) release(ip string) {
 	if state, ok := t.ipState[ip]; ok {
 		state.activeTunnels--
 		if state.activeTunnels <= 0 {
-			// All tunnels closed — reset current to parent so the
-			// next connection (if the same process reconnects) reuses it.
+			// All tunnels closed — record when the session ended so we
+			// can distinguish a rapid reconnect (same session) from a
+			// genuinely new session after a gap.
 			state.activeTunnels = 0
-			state.currentID = state.parentID
+			state.sessionEndTime = time.Now()
 		}
 	}
 }
@@ -749,7 +786,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	outReq.Header.Del("Proxy-Connection")
 	outReq.Header.Del("Proxy-Authorization")
 	outReq.Header.Del("X-Quint-Agent")
-	outReq.Header.Set("X-Quint-Trace", tc.String())
+	outReq.Header.Del("X-Quint-Trace")
 
 	resp, err := p.transport.RoundTrip(outReq)
 	if err != nil {
@@ -880,10 +917,12 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Release this tunnel slot when serveMITM (or early return) finishes.
 	defer p.tunnelTracker.release(trackerKey)
 
-	// Tag the identity with provider info
+	// Tag the identity with provider and tool info
 	if provider != "" && identity != nil && identity.Provider == "" {
 		identity.Provider = provider
-		_ = p.authDB.UpdateAgentProvider(identity.AgentID, provider, domain)
+		toolName, _ := ParseToolFromUA(r.Header.Get("User-Agent"))
+		identity.Tool = toolName
+		_ = p.authDB.UpdateAgentProvider(identity.AgentID, provider, toolName, domain)
 	}
 
 	subjectID, agentID, agentName := subjectFromIdentity(identity, "http-agent")
@@ -1085,8 +1124,13 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 			if identity.Provider == "" {
 				if provider := InferProvider(domain); provider != "" {
 					identity.Provider = provider
-					_ = p.authDB.UpdateAgentProvider(identity.AgentID, provider, domain)
-					qlog.Info("classified agent %s as provider=%s from domain %s", agentName, provider, domain)
+					toolName, _ := ParseToolFromUA(req.Header.Get("User-Agent"))
+					if toolName == "" {
+						toolName = identity.Tool
+					}
+					identity.Tool = toolName
+					_ = p.authDB.UpdateAgentProvider(identity.AgentID, provider, toolName, domain)
+					qlog.Info("classified agent %s as provider=%s tool=%s from domain %s", agentName, provider, toolName, domain)
 				}
 			}
 			if req.Method == "POST" && bodyPreview != "" {
@@ -1200,9 +1244,7 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 
 		// Strip quint headers before forwarding to upstream
 		req.Header.Del("X-Quint-Agent")
-
-		// Inject trace header on outgoing request
-		req.Header.Set("X-Quint-Trace", tc.String())
+		req.Header.Del("X-Quint-Trace")
 
 		// Forward request to real server (body streams through)
 		if err := req.Write(serverConn); err != nil {

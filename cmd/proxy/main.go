@@ -360,8 +360,13 @@ func handleParentMessage(
 			if correlationEngine != nil {
 				rel := correlationEngine.AddSpawnEvent(spawnEvent)
 				if rel != nil {
-					qlog.Info("relationship: %s→%s (confidence=%.2f, depth=%d)",
-						rel.ParentAgent, rel.ChildAgent, rel.Confidence, rel.Depth)
+					qlog.Info("relationship: %s→%s (confidence=%.2f, depth=%d, framework=%s)",
+						rel.ParentAgent, rel.ChildAgent, rel.Confidence, rel.Depth, spawnEvent.Framework)
+
+					// Persist relationship to audit DB
+					if relayAuditLogger != nil {
+						relayAuditLogger.RecordRelationship(rel.ParentAgent, rel.ChildAgent, rel.Confidence, rel.Depth, rel.SpawnType, "spawn")
+					}
 
 					// Publish to Kafka
 					if kafkaProducer != nil {
@@ -377,6 +382,21 @@ func handleParentMessage(
 						})
 					}
 				}
+			}
+
+			// Persist spawn event to audit DB
+			if relayAuditLogger != nil {
+				relayAuditLogger.RecordSpawnEvent(
+					spawnEvent.DetectedAt.Format(time.RFC3339),
+					spawnEvent.PatternID,
+					spawnEvent.ParentAgent,
+					spawnEvent.ChildHint,
+					spawnEvent.SpawnType,
+					spawnEvent.ToolName,
+					spawnEvent.ServerName,
+					spawnEvent.ArgumentsRef,
+					spawnEvent.Confidence,
+				)
 			}
 
 			// Publish spawn event to Kafka

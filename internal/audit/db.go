@@ -524,6 +524,16 @@ type AgentRelationshipRow struct {
 	TraceID     *string
 }
 
+// GetChildCount returns the number of distinct child agents for a parent.
+func (d *DB) GetChildCount(parentAgent string) (int, error) {
+	var count int
+	err := d.db.QueryRow(
+		"SELECT COUNT(DISTINCT child_agent) FROM agent_relationships WHERE parent_agent = ?",
+		parentAgent,
+	).Scan(&count)
+	return count, err
+}
+
 // GetAllRelationships returns all agent relationships.
 func (d *DB) GetAllRelationships() ([]AgentRelationshipRow, error) {
 	rows, err := d.db.Query(`
