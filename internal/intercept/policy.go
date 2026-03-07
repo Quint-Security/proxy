@@ -140,6 +140,13 @@ type PolicyConfig struct {
 	AutoRegisterAgents     bool                `json:"auto_register_agents,omitempty"`
 	DefaultAgentScopes     string              `json:"default_agent_scopes,omitempty"` // default "tools:read"; use "tools:read,tools:write" for read+write
 	ForwardProxy           *ForwardProxyPolicy `json:"forward_proxy,omitempty"`
+	Cloud                  *CloudConfig        `json:"cloud,omitempty"`
+}
+
+// CloudConfig holds cloud dashboard forwarding settings.
+type CloudConfig struct {
+	URL    string `json:"url"`
+	APIKey string `json:"api_key"`
 }
 
 // GetApprovalTimeout returns the effective approval timeout in seconds, defaulting to 300.

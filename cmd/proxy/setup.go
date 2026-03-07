@@ -289,11 +289,11 @@ func configureCloudRiskScoring(reader *bufio.Reader, dataDir string) {
 	fmt.Println("  Cloud risk scoring configuration:")
 
 	// Prompt for API URL
-	fmt.Print("    API URL (default: https://api-production-56df.up.railway.app): ")
+	fmt.Print("    API URL (default: https://api-production-5aa1.up.railway.app): ")
 	apiURL, _ := reader.ReadString('\n')
 	apiURL = strings.TrimSpace(apiURL)
 	if apiURL == "" {
-		apiURL = "https://api-production-56df.up.railway.app"
+		apiURL = "https://api-production-5aa1.up.railway.app"
 	}
 
 	// Prompt for API key
