@@ -573,8 +573,8 @@ func TestLoadSpawnPatterns_EmptyPath(t *testing.T) {
 	if len(patterns) == 0 {
 		t.Error("expected default patterns for empty path")
 	}
-	if len(patterns) < 28 {
-		t.Errorf("expected at least 28 patterns, got %d", len(patterns))
+	if len(patterns) < 50 {
+		t.Errorf("expected at least 50 patterns, got %d", len(patterns))
 	}
 }
 
@@ -884,11 +884,405 @@ func TestInferFramework_NewCLIPatterns(t *testing.T) {
 		{"claude-cli-spawn", "claude"},
 		{"codex-cli-spawn", "codex"},
 		{"gemini-cli-spawn", "gemini"},
+		{"aider-cli-spawn", "aider"},
+		{"cursor-cli-spawn", "cursor"},
+		{"devin-cli-spawn", "devin"},
+		{"swe-agent-cli-spawn", "swe-agent"},
+		{"amazon-q-cli-spawn", "amazon-q"},
 	}
 	for _, tt := range tests {
 		got := inferFramework(tt.patternID, "", "")
 		if got != tt.want {
 			t.Errorf("inferFramework(%q) = %q, want %q", tt.patternID, got, tt.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Coding IDE spawn detection
+// ---------------------------------------------------------------------------
+
+func TestDetectSpawn_CursorAgent(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"agent":"code-reviewer","task":"review PR"}`
+	ev := d.DetectSpawn("cursor-server", "cursor_agent_run", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for cursor agent")
+	}
+	if ev.Framework != "cursor" {
+		t.Errorf("framework=%s, want cursor", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_CursorTerminal(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"command":"claude code --task 'fix tests'"}`
+	ev := d.DetectSpawn("cursor", "run_terminal_command", args, "cursor-agent")
+	if ev == nil {
+		t.Fatal("expected spawn event for cursor run_terminal_command")
+	}
+	if ev.SpawnType != "fork" {
+		t.Errorf("spawn_type=%s, want fork", ev.SpawnType)
+	}
+}
+
+func TestDetectSpawn_CursorComposer(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"agent":"multi-file","task":"refactor","apply":true}`
+	ev := d.DetectSpawn("cursor", "composer_run", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for cursor composer")
+	}
+	if ev.Framework != "cursor" {
+		t.Errorf("framework=%s, want cursor", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_WindsurfCascade(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"agent":"analyzer","step":"plan"}`
+	ev := d.DetectSpawn("windsurf", "cascade_step", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for windsurf cascade")
+	}
+	if ev.Framework != "windsurf" {
+		t.Errorf("framework=%s, want windsurf", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_AiderSpawn(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	ev := d.DetectSpawn("shell", "aider_run", `{}`, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for aider")
+	}
+	if ev.Framework != "aider" {
+		t.Errorf("framework=%s, want aider", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_RealWorld_AiderCliViaBash(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"command":"aider --model deepseek --yes src/main.py"}`
+	ev := d.DetectSpawn("server", "Bash", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn for aider CLI via Bash")
+	}
+	if ev.Framework != "aider" {
+		t.Errorf("framework=%s, want aider", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_ClineExecuteCommand(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"execute":"run tests","agent":"code-fixer"}`
+	ev := d.DetectSpawn("vscode", "cline_run", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for cline")
+	}
+	if ev.Framework != "cline" {
+		t.Errorf("framework=%s, want cline", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_RooCodeAgent(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"agent":"architect","mode":"plan"}`
+	ev := d.DetectSpawn("vscode", "roo_task", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for roo-code")
+	}
+	if ev.Framework != "roo-code" {
+		t.Errorf("framework=%s, want roo-code", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_ContinueAgent(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"agent":"helper","model":"claude"}`
+	ev := d.DetectSpawn("vscode", "continue_agent", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for continue")
+	}
+	if ev.Framework != "continue" {
+		t.Errorf("framework=%s, want continue", ev.Framework)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AI dev tools spawn detection
+// ---------------------------------------------------------------------------
+
+func TestDetectSpawn_DevinTask(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"task":"implement feature","agent":"devin-worker"}`
+	ev := d.DetectSpawn("cognition", "devin_task", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for devin")
+	}
+	if ev.Framework != "devin" {
+		t.Errorf("framework=%s, want devin", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_SWEAgent(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	ev := d.DetectSpawn("princeton", "swe_agent_run", `{}`, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for swe-agent")
+	}
+	if ev.Framework != "swe-agent" {
+		t.Errorf("framework=%s, want swe-agent", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_RealWorld_SWEAgentViaBash(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"command":"python -m swe_agent run --issue 123"}`
+	ev := d.DetectSpawn("server", "Bash", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn for swe-agent via Bash")
+	}
+}
+
+func TestDetectSpawn_AmazonQAgent(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"task":"transform code","agent":"q-worker"}`
+	ev := d.DetectSpawn("aws", "amazon_q_dev", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for amazon-q")
+	}
+	if ev.Framework != "amazon-q" {
+		t.Errorf("framework=%s, want amazon-q", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_JunieAgent(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	ev := d.DetectSpawn("jetbrains", "junie_task", `{}`, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for junie")
+	}
+	if ev.Framework != "junie" {
+		t.Errorf("framework=%s, want junie", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_JetBrainsAI(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"agent":"code-assist","task":"refactor"}`
+	ev := d.DetectSpawn("ide", "jetbrains_ai_run", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for jetbrains")
+	}
+	if ev.Framework != "jetbrains" {
+		t.Errorf("framework=%s, want jetbrains", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_TabnineAgent(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"agent":"tabnine-assistant","task":"complete"}`
+	ev := d.DetectSpawn("ide", "tabnine_agent", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for tabnine")
+	}
+	if ev.Framework != "tabnine" {
+		t.Errorf("framework=%s, want tabnine", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_AugmentAgent(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"agent":"augment-worker","task":"implement"}`
+	ev := d.DetectSpawn("ide", "augment_code", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for augment")
+	}
+	if ev.Framework != "augment" {
+		t.Errorf("framework=%s, want augment", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_CodyAgent(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"agent":"cody-assistant","command":"explain"}`
+	ev := d.DetectSpawn("sourcegraph", "cody_agent", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for cody")
+	}
+	if ev.Framework != "cody" {
+		t.Errorf("framework=%s, want cody", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_BoltAgent(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"agent":"bolt-builder","task":"scaffold"}`
+	ev := d.DetectSpawn("web", "bolt_generate", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for bolt")
+	}
+	if ev.Framework != "bolt" {
+		t.Errorf("framework=%s, want bolt", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_LovableAgent(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"agent":"lovable-builder","build":"app"}`
+	ev := d.DetectSpawn("web", "lovable_build", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn event for lovable")
+	}
+	if ev.Framework != "lovable" {
+		t.Errorf("framework=%s, want lovable", ev.Framework)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// IDE subprocess detection via real-world Bash/shell
+// ---------------------------------------------------------------------------
+
+func TestDetectSpawn_RealWorld_CursorAgentViaBash(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"command":"cursor agent --task 'fix linting'"}`
+	ev := d.DetectSpawn("server", "Bash", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn for cursor agent via Bash")
+	}
+	if ev.Framework != "cursor" {
+		t.Errorf("framework=%s, want cursor", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_RealWorld_DevinViaBash(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"command":"devin run --issue 456"}`
+	ev := d.DetectSpawn("server", "Bash", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn for devin via Bash")
+	}
+	if ev.Framework != "devin" {
+		t.Errorf("framework=%s, want devin", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_RealWorld_WindsurfViaShell(t *testing.T) {
+	d := NewSpawnDetector(nil)
+	args := `{"command":"windsurf cascade --task refactor"}`
+	ev := d.DetectSpawn("server", "shell", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn for windsurf via shell")
+	}
+	if ev.Framework != "windsurf" {
+		t.Errorf("framework=%s, want windsurf", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_RealWorld_DefaultPatterns_AllIDs(t *testing.T) {
+	patterns := DefaultSpawnPatterns()
+	idSet := make(map[string]bool)
+	for _, p := range patterns {
+		idSet[p.ID] = true
+	}
+
+	allExpectedIDs := []string{
+		// Core AI providers
+		"openai-handoff", "claude-agent-tool", "claude-subagent",
+		"codex-spawn", "gemini-function-call", "vertex-agent-builder",
+		// Agent frameworks
+		"langchain-agent-executor", "langgraph-handoff",
+		"crewai-delegate", "crewai-coworker",
+		"autogen-initiate-chat", "autogen-groupchat",
+		"semantic-kernel-invoke",
+		"bedrock-invoke-agent", "bedrock-action-group",
+		"copilot-agent",
+		// Coding IDEs
+		"cursor-agent", "cursor-terminal", "cursor-composer",
+		"windsurf-cascade", "windsurf-command", "codeium-agent",
+		"aider-spawn", "continue-agent",
+		"cline-command", "roo-code-agent",
+		// AI dev tools
+		"devin-task", "swe-agent-spawn",
+		"amazon-q-agent", "q-developer-cli",
+		"junie-agent", "jetbrains-ai-agent",
+		"bolt-agent", "lovable-agent",
+		"tabnine-agent", "augment-agent", "cody-agent",
+		// Generic + shell patterns
+		"generic-create-agent", "delegation-flag",
+		"bash-agent-spawn", "shell-tool-spawn", "shell-agent-spawn",
+		"terminal-agent-spawn", "cmd-agent-spawn", "subprocess-agent",
+		// CLI spawn patterns
+		"claude-cli-spawn", "codex-cli-spawn", "gemini-cli-spawn",
+		"aider-cli-spawn", "cursor-cli-spawn", "devin-cli-spawn",
+		"swe-agent-cli-spawn", "amazon-q-cli-spawn",
+		"interpreter-agent-spawn",
+		// Other generic
+		"subtask-spawn", "a2a-delegation", "run-agent", "invoke-assistant",
+	}
+
+	for _, id := range allExpectedIDs {
+		if !idSet[id] {
+			t.Errorf("missing pattern: %s", id)
+		}
+	}
+}
+
+func TestInferFramework_AllIDEPatterns(t *testing.T) {
+	tests := []struct {
+		patternID string
+		want      string
+	}{
+		{"cursor-agent", "cursor"},
+		{"cursor-terminal", "cursor"},
+		{"cursor-composer", "cursor"},
+		{"windsurf-cascade", "windsurf"},
+		{"windsurf-command", "windsurf"},
+		{"codeium-agent", "codeium"},
+		{"aider-spawn", "aider"},
+		{"continue-agent", "continue"},
+		{"cline-command", "cline"},
+		{"roo-code-agent", "roo-code"},
+		{"devin-task", "devin"},
+		{"swe-agent-spawn", "swe-agent"},
+		{"amazon-q-agent", "amazon-q"},
+		{"q-developer-cli", "amazon-q"},
+		{"junie-agent", "junie"},
+		{"jetbrains-ai-agent", "jetbrains"},
+		{"bolt-agent", "bolt"},
+		{"lovable-agent", "lovable"},
+		{"tabnine-agent", "tabnine"},
+		{"augment-agent", "augment"},
+		{"cody-agent", "cody"},
+	}
+	for _, tt := range tests {
+		got := inferFramework(tt.patternID, "", "")
+		if got != tt.want {
+			t.Errorf("inferFramework(%q) = %q, want %q", tt.patternID, got, tt.want)
+		}
+	}
+}
+
+func TestInferFramework_FallbackIDEKeywords(t *testing.T) {
+	tests := []struct {
+		tool string
+		want string
+	}{
+		{"cursor_dispatch", "cursor"},
+		{"windsurf_run", "windsurf"},
+		{"aider_edit", "aider"},
+		{"cline_execute", "cline"},
+		{"devin_plan", "devin"},
+		{"junie_task", "junie"},
+		{"tabnine_complete", "tabnine"},
+		{"augment_assist", "augment"},
+		{"cody_explain", "cody"},
+	}
+	for _, tt := range tests {
+		got := inferFramework("generic-create-agent", tt.tool, "")
+		if got != tt.want {
+			t.Errorf("inferFramework(generic, %q) = %q, want %q", tt.tool, got, tt.want)
 		}
 	}
 }

@@ -67,8 +67,8 @@ func DefaultSpawnPatterns() []SpawnPattern {
 		// --- Claude / Anthropic ---
 		{
 			ID:          "claude-agent-tool",
-			Description: "Claude computer_use or Agent tool delegation",
-			ToolPattern: "*Agent*",
+			Description: "Claude Code Agent tool delegation",
+			ToolPattern: "Agent",
 			ArgPatterns: []string{`"prompt"`, `"subagent"`, `"task"`},
 			Confidence:  0.85,
 			SpawnType:   "delegation",
@@ -202,6 +202,200 @@ func DefaultSpawnPatterns() []SpawnPattern {
 			SpawnType:   "delegation",
 		},
 
+		// --- Cursor IDE ---
+		{
+			ID:          "cursor-agent",
+			Description: "Cursor IDE agent tool invocation",
+			ToolPattern: "*cursor*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"run"`},
+			Confidence:  0.80,
+			SpawnType:   "delegation",
+		},
+		{
+			ID:          "cursor-terminal",
+			Description: "Cursor run_terminal_command spawning agent processes",
+			ToolPattern: "*run_terminal*",
+			ArgPatterns: []string{`claude`, `codex`, `gemini`, `aider`, `agent`, `copilot`},
+			Confidence:  0.75,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "cursor-composer",
+			Description: "Cursor Composer multi-file agent delegation",
+			ToolPattern: "*composer*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"apply"`},
+			Confidence:  0.75,
+			SpawnType:   "delegation",
+		},
+
+		// --- Windsurf / Codeium (Cascade) ---
+		{
+			ID:          "windsurf-cascade",
+			Description: "Windsurf Cascade agent delegation",
+			ToolPattern: "*cascade*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"step"`},
+			Confidence:  0.80,
+			SpawnType:   "delegation",
+		},
+		{
+			ID:          "windsurf-command",
+			Description: "Windsurf/Codeium run_command spawning agents",
+			ToolPattern: "*windsurf*",
+			ArgPatterns: []string{`"agent"`, `"run"`, `"execute"`},
+			Confidence:  0.75,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "codeium-agent",
+			Description: "Codeium agent/extension invocation",
+			ToolPattern: "*codeium*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"run"`},
+			Confidence:  0.75,
+			SpawnType:   "delegation",
+		},
+
+		// --- Aider ---
+		{
+			ID:          "aider-spawn",
+			Description: "Aider CLI agent spawn",
+			ToolPattern: "*aider*",
+			ArgPatterns: []string{},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+
+		// --- Continue.dev ---
+		{
+			ID:          "continue-agent",
+			Description: "Continue.dev agent delegation",
+			ToolPattern: "*continue*",
+			ArgPatterns: []string{`"agent"`, `"model"`, `"task"`},
+			Confidence:  0.70,
+			SpawnType:   "delegation",
+		},
+
+		// --- Cline / Roo Code ---
+		{
+			ID:          "cline-command",
+			Description: "Cline execute_command spawning agent processes",
+			ToolPattern: "*cline*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"execute"`},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "roo-code-agent",
+			Description: "Roo Code agent delegation",
+			ToolPattern: "*roo*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"mode"`},
+			Confidence:  0.75,
+			SpawnType:   "delegation",
+		},
+
+		// --- Devin (Cognition) ---
+		{
+			ID:          "devin-task",
+			Description: "Devin autonomous agent task delegation",
+			ToolPattern: "*devin*",
+			ArgPatterns: []string{`"task"`, `"agent"`, `"plan"`},
+			Confidence:  0.85,
+			SpawnType:   "delegation",
+		},
+
+		// --- SWE-agent (Princeton) ---
+		{
+			ID:          "swe-agent-spawn",
+			Description: "SWE-agent subprocess spawning",
+			ToolPattern: "*swe*agent*",
+			ArgPatterns: []string{},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+
+		// --- Amazon Q Developer ---
+		{
+			ID:          "amazon-q-agent",
+			Description: "Amazon Q Developer agent invocation",
+			ToolPattern: "*amazon*q*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"transform"`},
+			Confidence:  0.80,
+			SpawnType:   "delegation",
+		},
+		{
+			ID:          "q-developer-cli",
+			Description: "Amazon Q Developer CLI agent",
+			ToolPattern: "*q_developer*",
+			ArgPatterns: []string{},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+
+		// --- JetBrains AI / Junie ---
+		{
+			ID:          "junie-agent",
+			Description: "JetBrains Junie autonomous agent",
+			ToolPattern: "*junie*",
+			ArgPatterns: []string{},
+			Confidence:  0.80,
+			SpawnType:   "delegation",
+		},
+		{
+			ID:          "jetbrains-ai-agent",
+			Description: "JetBrains AI assistant agent delegation",
+			ToolPattern: "*jetbrains*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"action"`},
+			Confidence:  0.75,
+			SpawnType:   "delegation",
+		},
+
+		// --- Bolt.new / Lovable / v0 (web-based AI builders) ---
+		{
+			ID:          "bolt-agent",
+			Description: "Bolt.new autonomous coding agent",
+			ToolPattern: "*bolt*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"generate"`},
+			Confidence:  0.70,
+			SpawnType:   "delegation",
+		},
+		{
+			ID:          "lovable-agent",
+			Description: "Lovable autonomous coding agent",
+			ToolPattern: "*lovable*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"build"`},
+			Confidence:  0.70,
+			SpawnType:   "delegation",
+		},
+
+		// --- Tabnine ---
+		{
+			ID:          "tabnine-agent",
+			Description: "Tabnine agent mode invocation",
+			ToolPattern: "*tabnine*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"action"`},
+			Confidence:  0.75,
+			SpawnType:   "delegation",
+		},
+
+		// --- Augment Code ---
+		{
+			ID:          "augment-agent",
+			Description: "Augment Code agent delegation",
+			ToolPattern: "*augment*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"action"`},
+			Confidence:  0.75,
+			SpawnType:   "delegation",
+		},
+
+		// --- Sourcegraph Cody ---
+		{
+			ID:          "cody-agent",
+			Description: "Sourcegraph Cody agent delegation",
+			ToolPattern: "*cody*",
+			ArgPatterns: []string{`"agent"`, `"task"`, `"command"`},
+			Confidence:  0.75,
+			SpawnType:   "delegation",
+		},
+
 		// --- Generic patterns (lower confidence, catch-all) ---
 		{
 			ID:          "generic-create-agent",
@@ -227,7 +421,7 @@ func DefaultSpawnPatterns() []SpawnPattern {
 			ID:          "bash-agent-spawn",
 			Description: "Bash tool launching agent processes (Claude Code, etc.)",
 			ToolPattern: "*bash*",
-			ArgPatterns: []string{`claude`, `codex`, `gemini`, `gpt`, `anthropic`, `openai`, `agent`, `llm`, `copilot`},
+			ArgPatterns: []string{`claude`, `codex`, `gemini`, `gpt`, `anthropic`, `openai`, `agent`, `llm`, `copilot`, `cursor`, `windsurf`, `aider`, `cline`, `devin`, `swe-agent`, `junie`},
 			Confidence:  0.75,
 			SpawnType:   "fork",
 		},
@@ -235,7 +429,7 @@ func DefaultSpawnPatterns() []SpawnPattern {
 			ID:          "shell-tool-spawn",
 			Description: "Shell tool launching agent processes",
 			ToolPattern: "*shell*",
-			ArgPatterns: []string{`claude`, `codex`, `gemini`, `gpt`, `anthropic`, `openai`, `agent`, `llm`, `copilot`},
+			ArgPatterns: []string{`claude`, `codex`, `gemini`, `gpt`, `anthropic`, `openai`, `agent`, `llm`, `copilot`, `cursor`, `windsurf`, `aider`, `cline`, `devin`, `swe-agent`, `junie`},
 			Confidence:  0.75,
 			SpawnType:   "fork",
 		},
@@ -243,7 +437,7 @@ func DefaultSpawnPatterns() []SpawnPattern {
 			ID:          "shell-agent-spawn",
 			Description: "Shell/exec tools launching agent processes",
 			ToolPattern: "*exec*",
-			ArgPatterns: []string{`agent`, `assistant`, `claude`, `gpt`, `llm`, `codex`, `gemini`, `copilot`},
+			ArgPatterns: []string{`agent`, `assistant`, `claude`, `gpt`, `llm`, `codex`, `gemini`, `copilot`, `cursor`, `windsurf`, `aider`, `cline`, `devin`, `swe-agent`, `junie`},
 			Confidence:  0.70,
 			SpawnType:   "fork",
 		},
@@ -251,7 +445,7 @@ func DefaultSpawnPatterns() []SpawnPattern {
 			ID:          "terminal-agent-spawn",
 			Description: "Terminal/console tool launching agent processes",
 			ToolPattern: "*terminal*",
-			ArgPatterns: []string{`claude`, `codex`, `gemini`, `gpt`, `anthropic`, `openai`, `agent`, `llm`, `copilot`},
+			ArgPatterns: []string{`claude`, `codex`, `gemini`, `gpt`, `anthropic`, `openai`, `agent`, `llm`, `copilot`, `cursor`, `windsurf`, `aider`, `cline`, `devin`, `swe-agent`, `junie`},
 			Confidence:  0.70,
 			SpawnType:   "fork",
 		},
@@ -259,7 +453,7 @@ func DefaultSpawnPatterns() []SpawnPattern {
 			ID:          "cmd-agent-spawn",
 			Description: "Command tool launching agent processes",
 			ToolPattern: "*command*",
-			ArgPatterns: []string{`claude`, `codex`, `gemini`, `gpt`, `anthropic`, `openai`, `agent`, `llm`, `copilot`},
+			ArgPatterns: []string{`claude`, `codex`, `gemini`, `gpt`, `anthropic`, `openai`, `agent`, `llm`, `copilot`, `cursor`, `windsurf`, `aider`, `cline`, `devin`, `swe-agent`, `junie`},
 			Confidence:  0.70,
 			SpawnType:   "fork",
 		},
@@ -267,7 +461,7 @@ func DefaultSpawnPatterns() []SpawnPattern {
 			ID:          "subprocess-agent",
 			Description: "Subprocess/spawn launching agent processes",
 			ToolPattern: "*spawn*",
-			ArgPatterns: []string{`agent`, `assistant`, `claude`, `gpt`, `llm`, `codex`, `gemini`, `copilot`},
+			ArgPatterns: []string{`agent`, `assistant`, `claude`, `gpt`, `llm`, `codex`, `gemini`, `copilot`, `cursor`, `windsurf`, `aider`, `cline`, `devin`, `swe-agent`, `junie`},
 			Confidence:  0.70,
 			SpawnType:   "fork",
 		},
@@ -297,6 +491,46 @@ func DefaultSpawnPatterns() []SpawnPattern {
 			ToolPattern: "*",
 			ArgPatterns: []string{`"gemini "`, `"gemini\n`, `gemini agent`, `gemini run`, `npx @google`},
 			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "aider-cli-spawn",
+			Description: "Any tool spawning Aider CLI as subprocess",
+			ToolPattern: "*",
+			ArgPatterns: []string{`"aider "`, `"aider\n`, `aider --model`, `aider --yes`},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "cursor-cli-spawn",
+			Description: "Any tool spawning Cursor agent as subprocess",
+			ToolPattern: "*",
+			ArgPatterns: []string{`cursor agent`, `cursor --agent`, `cursor composer`},
+			Confidence:  0.75,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "devin-cli-spawn",
+			Description: "Any tool spawning Devin as subprocess",
+			ToolPattern: "*",
+			ArgPatterns: []string{`devin run`, `devin agent`, `devin task`},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "swe-agent-cli-spawn",
+			Description: "Any tool spawning SWE-agent as subprocess",
+			ToolPattern: "*",
+			ArgPatterns: []string{`swe-agent`, `sweagent`, `python -m swe`},
+			Confidence:  0.75,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "amazon-q-cli-spawn",
+			Description: "Any tool spawning Amazon Q CLI as subprocess",
+			ToolPattern: "*",
+			ArgPatterns: []string{`"q "`, `q chat`, `q dev`, `amazon-q`},
+			Confidence:  0.75,
 			SpawnType:   "fork",
 		},
 		{
@@ -548,6 +782,7 @@ func deterministicChildID(serverName, toolName, argsJSON string) string {
 func inferFramework(patternID, toolName, argsJSON string) string {
 	// Direct mapping from pattern IDs to frameworks
 	patternFrameworks := map[string]string{
+		// Core AI providers
 		"openai-handoff":           "openai",
 		"claude-agent-tool":        "claude",
 		"claude-subagent":          "claude",
@@ -557,6 +792,7 @@ func inferFramework(patternID, toolName, argsJSON string) string {
 		"gemini-function-call":     "gemini",
 		"gemini-cli-spawn":         "gemini",
 		"vertex-agent-builder":     "vertex-ai",
+		// Agent frameworks
 		"langchain-agent-executor": "langchain",
 		"langgraph-handoff":        "langgraph",
 		"crewai-delegate":          "crewai",
@@ -568,6 +804,34 @@ func inferFramework(patternID, toolName, argsJSON string) string {
 		"bedrock-action-group":     "bedrock",
 		"copilot-agent":            "copilot",
 		"a2a-delegation":           "a2a",
+		// Coding IDEs
+		"cursor-agent":             "cursor",
+		"cursor-terminal":          "cursor",
+		"cursor-composer":          "cursor",
+		"cursor-cli-spawn":         "cursor",
+		"windsurf-cascade":         "windsurf",
+		"windsurf-command":         "windsurf",
+		"codeium-agent":            "codeium",
+		"aider-spawn":              "aider",
+		"aider-cli-spawn":          "aider",
+		"continue-agent":           "continue",
+		"cline-command":            "cline",
+		"roo-code-agent":           "roo-code",
+		// AI dev tools
+		"devin-task":               "devin",
+		"devin-cli-spawn":          "devin",
+		"swe-agent-spawn":          "swe-agent",
+		"swe-agent-cli-spawn":      "swe-agent",
+		"amazon-q-agent":           "amazon-q",
+		"q-developer-cli":          "amazon-q",
+		"amazon-q-cli-spawn":       "amazon-q",
+		"junie-agent":              "junie",
+		"jetbrains-ai-agent":       "jetbrains",
+		"bolt-agent":               "bolt",
+		"lovable-agent":            "lovable",
+		"tabnine-agent":            "tabnine",
+		"augment-agent":            "augment",
+		"cody-agent":               "cody",
 	}
 	if fw, ok := patternFrameworks[patternID]; ok {
 		return fw
@@ -581,10 +845,12 @@ func inferFramework(patternID, toolName, argsJSON string) string {
 		keywords  []string
 		framework string
 	}{
+		// Core AI providers
 		{[]string{"claude", "anthropic"}, "claude"},
 		{[]string{"openai", "gpt", "chatgpt"}, "openai"},
 		{[]string{"codex"}, "codex"},
 		{[]string{"gemini", "google_ai"}, "gemini"},
+		// Agent frameworks
 		{[]string{"langchain", "langgraph"}, "langchain"},
 		{[]string{"crewai", "crew_ai", "coworker"}, "crewai"},
 		{[]string{"autogen", "auto_gen"}, "autogen"},
@@ -592,6 +858,22 @@ func inferFramework(patternID, toolName, argsJSON string) string {
 		{[]string{"bedrock"}, "bedrock"},
 		{[]string{"vertex"}, "vertex-ai"},
 		{[]string{"copilot"}, "copilot"},
+		// Coding IDEs
+		{[]string{"cursor"}, "cursor"},
+		{[]string{"windsurf", "cascade"}, "windsurf"},
+		{[]string{"codeium"}, "codeium"},
+		{[]string{"aider"}, "aider"},
+		{[]string{"cline"}, "cline"},
+		{[]string{"roo_code", "roo-code"}, "roo-code"},
+		// AI dev tools
+		{[]string{"devin"}, "devin"},
+		{[]string{"swe-agent", "sweagent"}, "swe-agent"},
+		{[]string{"amazon_q", "amazon-q"}, "amazon-q"},
+		{[]string{"junie"}, "junie"},
+		{[]string{"jetbrains"}, "jetbrains"},
+		{[]string{"tabnine"}, "tabnine"},
+		{[]string{"augment"}, "augment"},
+		{[]string{"cody", "sourcegraph"}, "cody"},
 	}
 
 	combined := lower + " " + argLower
