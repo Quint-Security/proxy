@@ -1,9 +1,6 @@
 package intercept
 
-import (
-	"fmt"
-	"strings"
-)
+import "strings"
 
 // knownVerbs maps common tool name prefixes to canonical verbs.
 var knownVerbs = map[string]string{
@@ -50,14 +47,15 @@ func ClassifyAction(serverName, toolName, method string) string {
 	case "tools/call":
 		verb := inferVerb(toolName)
 		tool := sanitizeSegment(toolName)
-		return fmt.Sprintf("mcp:%s:%s.%s", server, tool, verb)
+		// "mcp:" + server + ":" + tool + "." + verb
+		return "mcp:" + server + ":" + tool + "." + verb
 	case "resources/read":
-		return fmt.Sprintf("mcp:%s:resource.read", server)
+		return "mcp:" + server + ":resource.read"
 	case "prompts/get":
-		return fmt.Sprintf("mcp:%s:prompt.get", server)
+		return "mcp:" + server + ":prompt.get"
 	default:
 		sanitized := sanitizeSegment(method)
-		return fmt.Sprintf("mcp:%s:%s", server, sanitized)
+		return "mcp:" + server + ":" + sanitized
 	}
 }
 
@@ -66,13 +64,15 @@ func ClassifyAction(serverName, toolName, method string) string {
 func inferVerb(toolName string) string {
 	lower := strings.ToLower(toolName)
 
-	// Split on _ and - to find verb prefix
-	for _, sep := range []string{"_", "-"} {
-		parts := strings.SplitN(lower, sep, 2)
-		if len(parts) >= 2 {
-			if verb, ok := knownVerbs[parts[0]]; ok {
-				return verb
-			}
+	// Check prefix before _ or - without allocating via SplitN
+	if idx := strings.IndexByte(lower, '_'); idx > 0 {
+		if verb, ok := knownVerbs[lower[:idx]]; ok {
+			return verb
+		}
+	}
+	if idx := strings.IndexByte(lower, '-'); idx > 0 {
+		if verb, ok := knownVerbs[lower[:idx]]; ok {
+			return verb
 		}
 	}
 
@@ -102,7 +102,7 @@ func ClassifyHTTPAction(method, host, path string) string {
 	domain := sanitizeSegment(StripPort(host))
 	verb := strings.ToLower(method)
 	slug := inferPathSlug(path)
-	return fmt.Sprintf("http:%s:%s.%s", domain, verb, slug)
+	return "http:" + domain + ":" + verb + "." + slug
 }
 
 // StripPort removes the port suffix from a host string.
@@ -171,13 +171,11 @@ func inferPathSlug(path string) string {
 	return sanitizeSegment(meaningful[len(meaningful)-1])
 }
 
+// segmentReplacer replaces characters that break the taxonomy format in a single pass.
+var segmentReplacer = strings.NewReplacer(":", "_", "-", "_", " ", "_", "/", "_")
+
 // sanitizeSegment replaces characters that would break the taxonomy format.
 // The risk API requires segments to match [a-z0-9_.]+ (no hyphens, colons, etc).
 func sanitizeSegment(s string) string {
-	s = strings.ToLower(s)
-	s = strings.ReplaceAll(s, ":", "_")
-	s = strings.ReplaceAll(s, "-", "_")
-	s = strings.ReplaceAll(s, " ", "_")
-	s = strings.ReplaceAll(s, "/", "_")
-	return s
+	return segmentReplacer.Replace(strings.ToLower(s))
 }

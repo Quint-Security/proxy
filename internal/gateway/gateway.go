@@ -752,11 +752,23 @@ func splitNamespacedTool(name string) (backend, tool string) {
 }
 
 func escapeJSON(s string) string {
-	// Use json.Marshal to properly escape all special characters
+	// Fast path: check if escaping is needed at all
+	needsEscape := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '"' || c == '\\' || c < 0x20 {
+			needsEscape = true
+			break
+		}
+	}
+	if !needsEscape {
+		return s
+	}
+
+	// Use json.Marshal for strings that actually need escaping
 	b, err := json.Marshal(s)
 	if err != nil {
 		return s
 	}
-	// Strip the surrounding quotes that Marshal adds
 	return string(b[1 : len(b)-1])
 }

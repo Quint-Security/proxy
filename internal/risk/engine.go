@@ -3,6 +3,7 @@ package risk
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
 )
@@ -43,6 +44,9 @@ type Engine struct {
 	disableBuiltins bool
 	remote          *RemoteScorer
 	includeHTTP     bool
+
+	// cachedPatterns is the pre-built merged pattern list, rebuilt when includeHTTP changes.
+	cachedPatterns []RiskPattern
 }
 
 // EngineOpts configures the risk engine.
@@ -78,7 +82,7 @@ func NewEngine(opts *EngineOpts) *Engine {
 		includeHTTP = opts.IncludeHTTP
 	}
 
-	return &Engine{
+	e := &Engine{
 		thresholds:      t,
 		tracker:         NewBehaviorTracker(t.WindowMs, db),
 		customPatterns:  cp,
@@ -87,6 +91,8 @@ func NewEngine(opts *EngineOpts) *Engine {
 		remote:          remote,
 		includeHTTP:     includeHTTP,
 	}
+	e.rebuildPatternCache()
+	return e
 }
 
 // NewEngineFromPolicy creates an engine configured from policy risk settings.
@@ -144,9 +150,30 @@ func NewEngineFromPolicy(riskCfg *intercept.RiskConfig, behaviorDB *BehaviorDB) 
 	return NewEngine(opts)
 }
 
+// rebuildPatternCache merges custom + builtin + HTTP patterns into a single cached slice.
+func (e *Engine) rebuildPatternCache() {
+	n := len(e.customPatterns)
+	if !e.disableBuiltins {
+		n += len(DefaultToolRisks)
+	}
+	if e.includeHTTP {
+		n += len(DefaultHTTPRisks)
+	}
+	patterns := make([]RiskPattern, 0, n)
+	patterns = append(patterns, e.customPatterns...)
+	if !e.disableBuiltins {
+		patterns = append(patterns, DefaultToolRisks...)
+	}
+	if e.includeHTTP {
+		patterns = append(patterns, DefaultHTTPRisks...)
+	}
+	e.cachedPatterns = patterns
+}
+
 // SetIncludeHTTP enables or disables HTTP risk patterns.
 func (e *Engine) SetIncludeHTTP(v bool) {
 	e.includeHTTP = v
+	e.rebuildPatternCache()
 }
 
 // DepthPenalty computes additional risk score based on agent tree depth.
@@ -174,27 +201,18 @@ func (e *Engine) ScoreToolCall(toolName, argsJSON, subjectID string) Score {
 	reasons := make([]string, 0, 4)
 	baseScore := 20 // default for unknown tools
 
-	// Check custom patterns first, then defaults (unless builtins disabled)
-	var allPatterns []RiskPattern
-	allPatterns = append(allPatterns, e.customPatterns...)
-	if !e.disableBuiltins {
-		allPatterns = append(allPatterns, DefaultToolRisks...)
-	}
-	if e.includeHTTP {
-		allPatterns = append(allPatterns, DefaultHTTPRisks...)
-	}
-
+	// Use pre-built pattern cache (custom + builtin + HTTP)
 	matched := false
-	for _, p := range allPatterns {
+	for _, p := range e.cachedPatterns {
 		if intercept.GlobMatch(p.Tool, toolName) {
 			baseScore = p.BaseScore
-			reasons = append(reasons, fmt.Sprintf(`tool "%s" matches pattern "%s" (base=%d)`, toolName, p.Tool, p.BaseScore))
+			reasons = append(reasons, `tool "`+toolName+`" matches pattern "`+p.Tool+`" (base=`+strconv.Itoa(p.BaseScore)+`)`)
 			matched = true
 			break
 		}
 	}
 	if !matched {
-		reasons = append(reasons, fmt.Sprintf(`tool "%s" — no pattern match, using default base score`, toolName))
+		reasons = append(reasons, `tool "`+toolName+`" — no pattern match, using default base score`)
 	}
 
 	// Argument analysis — custom keywords first, then builtins
@@ -203,14 +221,16 @@ func (e *Engine) ScoreToolCall(toolName, argsJSON, subjectID string) Score {
 		for _, kw := range e.customKeywords {
 			if kw.Pattern.MatchString(argsJSON) {
 				argBoost += kw.Boost
-				reasons = append(reasons, fmt.Sprintf(`argument contains "%s" (+%d)`, kw.Label, kw.Boost))
+				reasons = append(reasons, `argument contains "`+kw.Label+`" (+`+strconv.Itoa(kw.Boost)+`)`)
+
 			}
 		}
 		if !e.disableBuiltins {
 			for _, kw := range DangerousArgKeywords {
 				if kw.Pattern.MatchString(argsJSON) {
 					argBoost += kw.Boost
-					reasons = append(reasons, fmt.Sprintf(`argument contains "%s" (+%d)`, kw.Label, kw.Boost))
+					reasons = append(reasons, `argument contains "`+kw.Label+`" (+`+strconv.Itoa(kw.Boost)+`)`)
+
 				}
 			}
 		}
@@ -221,7 +241,7 @@ func (e *Engine) ScoreToolCall(toolName, argsJSON, subjectID string) Score {
 	recentCount := e.tracker.Count(subjectID)
 	if recentCount > 0 {
 		behaviorBoost = recentCount * 5
-		reasons = append(reasons, fmt.Sprintf("%d high-risk action(s) in window (+%d)", recentCount, behaviorBoost))
+		reasons = append(reasons, strconv.Itoa(recentCount)+" high-risk action(s) in window (+"+strconv.Itoa(behaviorBoost)+")")
 	}
 
 	raw := baseScore + argBoost + behaviorBoost
