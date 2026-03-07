@@ -34,7 +34,8 @@ type registerRequest struct {
 
 // registerResponse is the response from POST /v1/machines/register.
 type registerResponse struct {
-	ID string `json:"id"`
+	MachineID string `json:"machine_id"`
+	OrgID     string `json:"org_id"`
 }
 
 // heartbeatRequest is the body sent to POST /v1/machines/{id}/heartbeat.
@@ -46,17 +47,14 @@ type heartbeatRequest struct {
 }
 
 // EventPayload is a single event to push to the cloud.
+// Field names match the quint-api EventInput schema.
 type EventPayload struct {
-	EventID    string         `json:"event_id"`
-	Timestamp  string         `json:"timestamp"`
-	EventType  string         `json:"event_type"`
-	AgentID    string         `json:"agent_id,omitempty"`
-	ToolName   string         `json:"tool_name,omitempty"`
-	ServerName string         `json:"server_name,omitempty"`
-	RiskScore  int            `json:"risk_score,omitempty"`
-	RiskLevel  string         `json:"risk_level,omitempty"`
-	Verdict    string         `json:"verdict,omitempty"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
+	EventID   string `json:"event_id"`
+	Action    string `json:"action"`
+	Agent     string `json:"agent"`
+	Timestamp string `json:"timestamp"`
+	RiskScore *int   `json:"risk_score,omitempty"`
+	Blocked   bool   `json:"blocked"`
 }
 
 // eventsRequest is the body sent to POST /v1/machines/{id}/events.
@@ -127,7 +125,7 @@ func (c *Client) Register(version string) error {
 		return fmt.Errorf("decode register response: %w", err)
 	}
 
-	c.cloudUUID = result.ID
+	c.cloudUUID = result.MachineID
 	qlog.Info("registered with cloud: machine_id=%s, cloud_uuid=%s", c.machineID, c.cloudUUID)
 	return nil
 }

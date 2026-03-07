@@ -170,22 +170,13 @@ func runDaemon(args []string) {
 		Policy:  policy,
 		DataDir: dataDir,
 		OnEvent: func(info forwardproxy.EventInfo) {
-			score := 0
-			if info.RiskScore != nil {
-				score = *info.RiskScore
-			}
-			verdict := "allow"
-			if info.Blocked {
-				verdict = "deny"
-			}
 			forwarder.Enqueue(cloud.EventPayload{
 				EventID:   fmt.Sprintf("evt-%d", info.Timestamp.UnixMilli()),
+				Action:    info.Action,
+				Agent:     info.Agent,
 				Timestamp: info.Timestamp.UTC().Format(time.RFC3339),
-				EventType: "forward_proxy",
-				AgentID:   info.Agent,
-				ToolName:  info.Action,
-				RiskScore: score,
-				Verdict:   verdict,
+				RiskScore: info.RiskScore,
+				Blocked:   info.Blocked,
 			})
 		},
 	})
