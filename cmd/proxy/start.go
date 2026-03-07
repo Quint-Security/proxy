@@ -149,15 +149,9 @@ func runStart(args []string) {
 		}
 	}
 
-	// Open credential store for HTTP backends
-	encKey := credential.DeriveEncryptionKey(passphrase, kp.PrivateKey)
-	credStore, err := credential.OpenStore(dataDir, encKey)
-	if err != nil {
-		qlog.Error("credential store unavailable: %v (HTTP backends won't have auth)", err)
-	}
-	if credStore != nil {
-		defer credStore.Close()
-	}
+	// Credential store removed — HTTP backends use env vars for auth
+	// Gateway handles nil credStore gracefully
+	var credStore *credential.Store
 
 	// Initialize Kafka producer if configured
 	var kafkaProd *stream.Producer

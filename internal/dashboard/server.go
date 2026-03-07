@@ -2,11 +2,9 @@ package dashboard
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -22,9 +20,6 @@ import (
 	"github.com/Quint-Security/quint-proxy/internal/forwardproxy"
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
 )
-
-//go:embed all:static
-var staticFiles embed.FS
 
 // Server is the dashboard web server.
 type Server struct {
@@ -47,18 +42,14 @@ type Server struct {
 	httpStreamClients   map[chan string]struct{}
 	httpStreamClientsMu sync.Mutex
 
-	// Static file serving
-	staticDir string // if non-empty, serve from disk instead of embedded files
-
 	// HTTP server (stored for graceful shutdown in async mode)
 	httpServer *http.Server
 }
 
-// Opts configures the dashboard server.
+// Opts configures the API server.
 type Opts struct {
-	DataDir   string
-	Policy    intercept.PolicyConfig
-	StaticDir string // if set, serve from this directory instead of embedded files
+	DataDir string
+	Policy  intercept.PolicyConfig
 }
 
 // New creates a new dashboard server.
@@ -99,7 +90,6 @@ func NewWithOpts(opts Opts) (*Server, error) {
 		stopPoll:          make(chan struct{}),
 		graphClients:      make(map[chan string]struct{}),
 		httpStreamClients: make(map[chan string]struct{}),
-		staticDir:         opts.StaticDir,
 	}
 
 	// Verify audit chain integrity on startup
@@ -142,18 +132,6 @@ func (s *Server) buildMux() (*http.ServeMux, error) {
 	mux.HandleFunc("/api/cloud/justification", s.handleCloudJustification)
 	mux.HandleFunc("/api/cloud/health", s.handleCloudHealth)
 
-	// Static files — SPA-aware handler for Next.js static export
-	if s.staticDir != "" {
-		fmt.Printf("Serving static files from: %s\n", s.staticDir)
-		mux.Handle("/", &spaHandler{fs: http.Dir(s.staticDir)})
-	} else {
-		sub, err := fs.Sub(staticFiles, "static")
-		if err != nil {
-			return nil, fmt.Errorf("static files: %w", err)
-		}
-		mux.Handle("/", &spaHandler{fs: http.FS(sub)})
-	}
-
 	return mux, nil
 }
 
@@ -175,7 +153,7 @@ func (s *Server) Start(port int) error {
 		WriteTimeout: 30 * time.Second,
 	}
 
-	fmt.Printf("Quint dashboard: http://localhost:%d\n", port)
+	fmt.Printf("Quint API: http://localhost:%d\n", port)
 	return s.httpServer.ListenAndServe()
 }
 
@@ -1086,63 +1064,3 @@ func (s *Server) proxyCloudRequest(w http.ResponseWriter, url, apiKey string) {
 	w.Write(body)
 }
 
-// spaHandler serves static files and falls back to .html extension or index.html
-// for Next.js static export routing (e.g., /audit → audit.html).
-type spaHandler struct {
-	fs http.FileSystem
-}
-
-func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
-
-	// Strip trailing slash to prevent redirect loops
-	if path != "/" && strings.HasSuffix(path, "/") {
-		path = strings.TrimSuffix(path, "/")
-	}
-
-	// Try exact path first (for static assets like /_next/*, .css, .js)
-	if f, err := h.fs.Open(path); err == nil {
-		stat, statErr := f.Stat()
-		if statErr == nil && !stat.IsDir() {
-			defer f.Close()
-			http.ServeContent(w, r, stat.Name(), stat.ModTime(), f.(io.ReadSeeker))
-			return
-		}
-		f.Close()
-	}
-
-	// Try path + .html (e.g., /audit → /audit.html)
-	if f, err := h.fs.Open(path + ".html"); err == nil {
-		stat, statErr := f.Stat()
-		if statErr == nil {
-			defer f.Close()
-			http.ServeContent(w, r, stat.Name(), stat.ModTime(), f.(io.ReadSeeker))
-			return
-		}
-		f.Close()
-	}
-
-	// Try path/index.html (e.g., /some/path/ → /some/path/index.html)
-	if f, err := h.fs.Open(path + "/index.html"); err == nil {
-		stat, statErr := f.Stat()
-		if statErr == nil {
-			defer f.Close()
-			http.ServeContent(w, r, stat.Name(), stat.ModTime(), f.(io.ReadSeeker))
-			return
-		}
-		f.Close()
-	}
-
-	// Fallback to index.html for client-side routing
-	if f, err := h.fs.Open("/index.html"); err == nil {
-		stat, statErr := f.Stat()
-		if statErr == nil {
-			defer f.Close()
-			http.ServeContent(w, r, stat.Name(), stat.ModTime(), f.(io.ReadSeeker))
-			return
-		}
-		f.Close()
-	}
-
-	http.NotFound(w, r)
-}

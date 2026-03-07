@@ -54,11 +54,14 @@ func main() {
 		case "status":
 			runStatus(os.Args[2:])
 			return
-		case "dashboard":
-			runDashboard(os.Args[2:])
-			return
 		case "watch":
 			runWatch(os.Args[2:])
+			return
+		case "daemon":
+			runDaemon(os.Args[2:])
+			return
+		case "env":
+			runEnv(os.Args[2:])
 			return
 		case "export":
 			runExport(os.Args[2:])
@@ -80,9 +83,6 @@ func main() {
 		// Backward compat: advanced commands still work without "admin" prefix
 		case "init":
 			runInit(os.Args[2:])
-			return
-		case "connect":
-			runConnectShorthand(os.Args[2:])
 			return
 		case "agent":
 			runAgent(os.Args[2:])
@@ -133,14 +133,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  quint setup              Interactive setup wizard\n")
 		fmt.Fprintf(os.Stderr, "  quint start              Run the gateway\n")
 		fmt.Fprintf(os.Stderr, "  quint status             Health check\n")
-		fmt.Fprintf(os.Stderr, "  quint watch              HTTP/HTTPS forward proxy + dashboard\n")
+		fmt.Fprintf(os.Stderr, "  quint watch              HTTP/HTTPS forward proxy + API server\n")
 		fmt.Fprintf(os.Stderr, "    --port <port>          Proxy port (default 9090)\n")
-		fmt.Fprintf(os.Stderr, "    --dashboard-port <port> Dashboard port (default 8080)\n")
-		fmt.Fprintf(os.Stderr, "    --no-dashboard         Don't start dashboard\n")
-		fmt.Fprintf(os.Stderr, "    --no-open              Don't open browser\n")
-		fmt.Fprintf(os.Stderr, "    --static-dir <path>    Dashboard dev mode: serve from local dir\n")
-		fmt.Fprintf(os.Stderr, "  quint dashboard          Open the web dashboard\n")
-		fmt.Fprintf(os.Stderr, "    --static-dir <path>    Serve frontend from local directory (dev mode)\n")
+		fmt.Fprintf(os.Stderr, "    --api-port <port>      API server port (default 8080)\n")
+		fmt.Fprintf(os.Stderr, "  quint daemon              Run as system daemon (enterprise)\n")
+		fmt.Fprintf(os.Stderr, "  quint env                Print proxy env vars (use: eval $(quint env))\n")
 		fmt.Fprintf(os.Stderr, "  quint export             Export audit proof bundle\n\n")
 		fmt.Fprintf(os.Stderr, "Advanced:\n")
 		fmt.Fprintf(os.Stderr, "  quint admin <command>    Run an advanced command (quint admin --help)\n\n")

@@ -5,8 +5,11 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
+	"time"
 
+	"github.com/Quint-Security/quint-proxy/internal/cloud"
 	qcrypto "github.com/Quint-Security/quint-proxy/internal/crypto"
 	"github.com/Quint-Security/quint-proxy/internal/dashboard"
 	"github.com/Quint-Security/quint-proxy/internal/forwardproxy"
@@ -15,11 +18,14 @@ import (
 )
 
 // runWatch handles: quint watch [flags]
-// Starts an HTTP/HTTPS forward proxy with MITM TLS interception + dashboard.
+// Starts an HTTP/HTTPS forward proxy with MITM TLS interception + API server.
+// If a deploy token is available (--token, QUINT_DEPLOY_TOKEN, or config file),
+// also registers with the cloud and forwards events.
 func runWatch(args []string) {
-	var policyPath, staticDir string
-	var port, dashboardPort int
-	var noDashboard, noOpen bool
+	var policyPath string
+	var tokenFlag string
+	var apiURLFlag string
+	var port, apiPort int
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -33,28 +39,34 @@ func runWatch(args []string) {
 			if i < len(args) {
 				policyPath = args[i]
 			}
-		case "--dashboard-port":
+		case "--api-port", "--dashboard-port":
 			i++
 			if i < len(args) {
-				dashboardPort, _ = strconv.Atoi(args[i])
+				apiPort, _ = strconv.Atoi(args[i])
 			}
-		case "--static-dir":
+		case "--token":
 			i++
 			if i < len(args) {
-				staticDir = args[i]
+				tokenFlag = args[i]
 			}
-		case "--no-dashboard":
-			noDashboard = true
-		case "--no-open":
-			noOpen = true
+		case "--api-url":
+			i++
+			if i < len(args) {
+				apiURLFlag = args[i]
+			}
+		case "--no-dashboard", "--no-open", "--static-dir":
+			// Ignored for backward compatibility
+			if args[i] == "--static-dir" {
+				i++ // skip the value
+			}
 		}
 	}
 
 	if port == 0 {
 		port = 9090
 	}
-	if dashboardPort == 0 {
-		dashboardPort = 8080
+	if apiPort == 0 {
+		apiPort = 8080
 	}
 
 	policy, err := intercept.LoadPolicy(policyPath)
@@ -65,11 +77,79 @@ func runWatch(args []string) {
 	qlog.SetLevel(policy.LogLevel)
 	dataDir := intercept.ResolveDataDir(policy.DataDir)
 
-	proxy, err := forwardproxy.New(forwardproxy.Options{
+	// --- Cloud push (opt-in via --token or QUINT_DEPLOY_TOKEN) ---
+	deployToken := tokenFlag
+	if deployToken == "" {
+		deployToken = os.Getenv("QUINT_DEPLOY_TOKEN")
+	}
+
+	cloudAPIURL := apiURLFlag
+	if cloudAPIURL == "" {
+		cloudAPIURL = os.Getenv("QUINT_API_URL")
+	}
+	if cloudAPIURL == "" {
+		cloudAPIURL = cloud.DefaultAPIURL
+	}
+
+	var forwarder *cloud.Forwarder
+	var heartbeatStop chan struct{}
+	var heartbeatDone chan struct{}
+
+	if deployToken != "" {
+		client := cloud.NewClient(cloudAPIURL, deployToken)
+		if err := client.Register(version); err != nil {
+			qlog.Warn("cloud registration failed (continuing without cloud): %v", err)
+		} else {
+			forwarder = cloud.NewForwarder(client)
+			forwarder.Start()
+
+			// Heartbeat goroutine
+			startTime := time.Now()
+			heartbeatStop = make(chan struct{})
+			heartbeatDone = make(chan struct{})
+			go func() {
+				defer close(heartbeatDone)
+				ticker := time.NewTicker(60 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						uptime := int64(time.Since(startTime).Seconds())
+						eventsBuffered := forwarder.BufferLen()
+						if err := client.Heartbeat(version, uptime, 0, eventsBuffered); err != nil {
+							qlog.Warn("heartbeat failed: %v", err)
+						}
+					case <-heartbeatStop:
+						return
+					}
+				}
+			}()
+
+			qlog.Info("cloud push enabled: %s", cloudAPIURL)
+		}
+	}
+
+	proxyOpts := forwardproxy.Options{
 		Port:    port,
 		Policy:  policy,
 		DataDir: dataDir,
-	})
+	}
+
+	// Hook OnEvent if cloud forwarding is active
+	if forwarder != nil {
+		proxyOpts.OnEvent = func(info forwardproxy.EventInfo) {
+			forwarder.Enqueue(cloud.EventPayload{
+				EventID:   fmt.Sprintf("evt-%d", info.Timestamp.UnixMilli()),
+				Action:    info.Action,
+				Agent:     info.Agent,
+				Timestamp: info.Timestamp.UTC().Format(time.RFC3339),
+				RiskScore: info.RiskScore,
+				Blocked:   info.Blocked,
+			})
+		}
+	}
+
+	proxy, err := forwardproxy.New(proxyOpts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "quint: failed to create forward proxy: %v\n", err)
 		os.Exit(1)
@@ -92,50 +172,55 @@ func runWatch(args []string) {
 	fmt.Printf("    export HTTPS_PROXY=http://my-agent@localhost:%d\n", port)
 	fmt.Println()
 
-	// Start dashboard (non-blocking)
-	var dashSrv *dashboard.Server
-	if !noDashboard {
-		dashSrv, err = dashboard.NewWithOpts(dashboard.Opts{
-			DataDir:   dataDir,
-			Policy:    policy,
-			StaticDir: staticDir,
-		})
-		if err != nil {
-			qlog.Error("dashboard failed to start: %v", err)
+	// Start API server (non-blocking)
+	var apiSrv *dashboard.Server
+	apiSrv, err = dashboard.NewWithOpts(dashboard.Opts{
+		DataDir: dataDir,
+		Policy:  policy,
+	})
+	if err != nil {
+		qlog.Error("API server failed to start: %v", err)
+	} else {
+		if err := apiSrv.StartAsync(apiPort); err != nil {
+			qlog.Error("API server listen error: %v", err)
+			apiSrv = nil
 		} else {
-			if err := dashSrv.StartAsync(dashboardPort); err != nil {
-				qlog.Error("dashboard listen error: %v", err)
-				dashSrv = nil
-			} else {
-				fmt.Printf("  Dashboard: http://localhost:%d\n", dashboardPort)
-				fmt.Println()
-				if !noOpen {
-					go openBrowser(fmt.Sprintf("http://localhost:%d", dashboardPort))
-				}
-			}
+			fmt.Printf("  API: http://localhost:%d\n", apiPort)
+			fmt.Println()
 		}
 	}
 
-	// Signal handling — coordinated shutdown
+	// Coordinated shutdown (used by both signal handler and error path)
+	var shutdownOnce sync.Once
+	shutdown := func() {
+		shutdownOnce.Do(func() {
+			if heartbeatStop != nil {
+				close(heartbeatStop)
+				<-heartbeatDone
+			}
+			if forwarder != nil {
+				forwarder.Stop()
+			}
+			if apiSrv != nil {
+				apiSrv.Shutdown()
+			}
+			proxy.Close()
+		})
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		<-sigCh
 		qlog.Info("received signal, shutting down...")
-		if dashSrv != nil {
-			dashSrv.Shutdown()
-		}
-		proxy.Close()
+		shutdown()
 		os.Exit(0)
 	}()
 
 	// Blocking — forward proxy runs in foreground
 	if err := proxy.Start(); err != nil {
 		qlog.Error("forward proxy error: %v", err)
-		if dashSrv != nil {
-			dashSrv.Shutdown()
-		}
-		proxy.Close()
+		shutdown()
 		os.Exit(1)
 	}
 }

@@ -215,7 +215,7 @@ Store the decomposition and behavioral flags in the audit log for the dashboard 
 
 ## Testing
 
-1. Run the proxy in gateway mode with `risk_api` configured pointing at Railway: `https://api-production-56df.up.railway.app`
+1. Run the proxy in gateway mode with `risk_api` configured pointing at Railway: `https://api-production-5aa1.up.railway.app`
 2. API key: `sk-acme-b96cb84498324444`, Customer ID: `a1b2c3d4-e5f6-7890-abcd-ef1234567890`
 3. Make a tool call through the gateway
 4. Verify the scoring API receives the full event with MCP context and preceding actions
@@ -224,8 +224,8 @@ Store the decomposition and behavioral flags in the audit log for the dashboard 
 
 ## API Endpoint Reference
 
-- **Scoring API**: `POST https://api-production-56df.up.railway.app/events`
-- **Health check**: `GET https://api-production-56df.up.railway.app/health`
+- **Scoring API**: `POST https://api-production-5aa1.up.railway.app/events`
+- **Health check**: `GET https://api-production-5aa1.up.railway.app/health`
 - **Auth**: `X-API-Key: sk-acme-b96cb84498324444` header
 
 ## Important Notes
