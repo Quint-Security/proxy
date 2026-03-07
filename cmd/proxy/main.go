@@ -60,6 +60,9 @@ func main() {
 		case "daemon":
 			runDaemon(os.Args[2:])
 			return
+		case "env":
+			runEnv(os.Args[2:])
+			return
 		case "export":
 			runExport(os.Args[2:])
 			return
@@ -134,6 +137,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "    --port <port>          Proxy port (default 9090)\n")
 		fmt.Fprintf(os.Stderr, "    --api-port <port>      API server port (default 8080)\n")
 		fmt.Fprintf(os.Stderr, "  quint daemon              Run as system daemon (enterprise)\n")
+		fmt.Fprintf(os.Stderr, "  quint env                Print proxy env vars (use: eval $(quint env))\n")
 		fmt.Fprintf(os.Stderr, "  quint export             Export audit proof bundle\n\n")
 		fmt.Fprintf(os.Stderr, "Advanced:\n")
 		fmt.Fprintf(os.Stderr, "  quint admin <command>    Run an advanced command (quint admin --help)\n\n")
