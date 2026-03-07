@@ -23,8 +23,6 @@ func runAdmin(args []string) {
 		runDeny(args[1:])
 	case "approvals":
 		runApprovals(args[1:])
-	case "connect":
-		runConnectShorthand(args[1:])
 	case "init":
 		runInit(args[1:])
 	case "sync":
@@ -46,7 +44,6 @@ func printAdminUsage() {
 	fmt.Fprintf(os.Stderr, "  quint admin approve <id>       Approve a pending request\n")
 	fmt.Fprintf(os.Stderr, "  quint admin deny <id>          Deny a pending request\n")
 	fmt.Fprintf(os.Stderr, "  quint admin approvals          List pending approvals\n")
-	fmt.Fprintf(os.Stderr, "  quint admin connect <provider> Connect an OAuth provider\n")
 	fmt.Fprintf(os.Stderr, "  quint admin init               Low-level initialization\n")
 	fmt.Fprintf(os.Stderr, "  quint admin sync               Sync audit logs to cloud\n")
 	fmt.Fprintf(os.Stderr, "  quint admin http-proxy          Run HTTP proxy mode\n")

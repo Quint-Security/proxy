@@ -78,9 +78,6 @@ func main() {
 		case "init":
 			runInit(os.Args[2:])
 			return
-		case "connect":
-			runConnectShorthand(os.Args[2:])
-			return
 		case "agent":
 			runAgent(os.Args[2:])
 			return
