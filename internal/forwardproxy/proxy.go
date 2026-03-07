@@ -832,6 +832,13 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	domain := intercept.StripPort(host)
 	provider := InferProvider(domain)
 
+	// Passthrough: AI provider APIs get a blind TCP tunnel (no MITM).
+	// We intercept agent tool calls, not model inference traffic.
+	if isPassthroughDomain(domain) {
+		p.blindTunnel(w, r, host)
+		return
+	}
+
 	// Build tracker key as ip:toolName:provider.
 	toolName, _ := ParseToolFromUA(r.Header.Get("User-Agent"))
 	if toolName == "" {
