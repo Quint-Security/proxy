@@ -413,6 +413,19 @@ func extractChildHint(toolName, argsJSON string) string {
 	if argsJSON != "" {
 		var args map[string]any
 		if err := json.Unmarshal([]byte(argsJSON), &args); err == nil {
+			// Check nested objects first: args.agent.name, args.agent.id
+			// (must come before top-level "agent" check to avoid stringifying a map)
+			if agentObj, ok := args["agent"].(map[string]any); ok {
+				for _, sub := range []string{"name", "id", "agent_id"} {
+					if v, ok := agentObj[sub]; ok {
+						s := fmt.Sprintf("%v", v)
+						if s != "" && s != "<nil>" {
+							return s
+						}
+					}
+				}
+			}
+
 			// Priority-ordered list of keys that identify the child agent
 			for _, key := range []string{
 				"agent", "agent_name", "agent_id",
@@ -426,21 +439,14 @@ func extractChildHint(toolName, argsJSON string) string {
 				"subagent_type",            // Claude Code
 			} {
 				if v, ok := args[key]; ok {
+					// Skip map/slice values — they need nested extraction
+					switch v.(type) {
+					case map[string]any, []any:
+						continue
+					}
 					s := fmt.Sprintf("%v", v)
 					if s != "" && s != "<nil>" {
 						return s
-					}
-				}
-			}
-
-			// Check nested objects: args.agent.name, args.agent.id
-			if agentObj, ok := args["agent"].(map[string]any); ok {
-				for _, sub := range []string{"name", "id", "agent_id"} {
-					if v, ok := agentObj[sub]; ok {
-						s := fmt.Sprintf("%v", v)
-						if s != "" && s != "<nil>" {
-							return s
-						}
 					}
 				}
 			}
