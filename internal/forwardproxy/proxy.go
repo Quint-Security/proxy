@@ -854,10 +854,12 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Release this tunnel slot when serveMITM (or early return) finishes.
 	defer p.tunnelTracker.release(trackerKey)
 
-	// Tag the identity with provider info
+	// Tag the identity with provider and tool info
 	if provider != "" && identity != nil && identity.Provider == "" {
 		identity.Provider = provider
-		_ = p.authDB.UpdateAgentProvider(identity.AgentID, provider, domain)
+		toolName, _ := ParseToolFromUA(r.Header.Get("User-Agent"))
+		identity.Tool = toolName
+		_ = p.authDB.UpdateAgentProvider(identity.AgentID, provider, toolName, domain)
 	}
 
 	subjectID, agentID, agentName := subjectFromIdentity(identity, "http-agent")
@@ -1050,8 +1052,13 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 			if identity.Provider == "" {
 				if provider := InferProvider(domain); provider != "" {
 					identity.Provider = provider
-					_ = p.authDB.UpdateAgentProvider(identity.AgentID, provider, domain)
-					qlog.Info("classified agent %s as provider=%s from domain %s", agentName, provider, domain)
+					toolName, _ := ParseToolFromUA(req.Header.Get("User-Agent"))
+					if toolName == "" {
+						toolName = identity.Tool
+					}
+					identity.Tool = toolName
+					_ = p.authDB.UpdateAgentProvider(identity.AgentID, provider, toolName, domain)
+					qlog.Info("classified agent %s as provider=%s tool=%s from domain %s", agentName, provider, toolName, domain)
 				}
 			}
 			if req.Method == "POST" && bodyPreview != "" {

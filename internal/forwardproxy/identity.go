@@ -122,6 +122,9 @@ func (r *IdentityResolver) ResolveForHTTP(remoteAddr, ua, provider string) *auth
 	identity := r.registerWordAgent(provider, cacheKey)
 	if identity != nil {
 		identity.Provider = provider
+		if toolName != "_unknown" {
+			identity.Tool = toolName
+		}
 	}
 
 	r.httpIdentities.Store(cacheKey, identity)
@@ -147,6 +150,7 @@ func (r *IdentityResolver) ResolveChild(parent *auth.Identity, childNum int) *au
 	}
 	identity.Source = "child_detect"
 	identity.Provider = parent.Provider
+	identity.Tool = parent.Tool
 	return identity
 }
 

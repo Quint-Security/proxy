@@ -86,6 +86,7 @@ type Agent struct {
 	UpdatedAt     string `json:"updated_at"`
 	Provider      string `json:"provider,omitempty"`
 	Model         string `json:"model,omitempty"`
+	Tool          string `json:"tool,omitempty"`
 	FirstSeenHost string `json:"first_seen_host,omitempty"`
 }
 
@@ -122,6 +123,7 @@ func OpenDB(dataDir string) (*DB, error) {
 		"ALTER TABLE agents ADD COLUMN provider TEXT DEFAULT ''",
 		"ALTER TABLE agents ADD COLUMN model TEXT DEFAULT ''",
 		"ALTER TABLE agents ADD COLUMN first_seen_host TEXT DEFAULT ''",
+		"ALTER TABLE agents ADD COLUMN tool TEXT DEFAULT ''",
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			// Ignore "duplicate column" — migration already applied
@@ -269,7 +271,7 @@ func (d *DB) GetAgentByApiKeyID(keyID string) (*Agent, error) {
 func (d *DB) ListAgents() ([]*Agent, error) {
 	rows, err := d.db.Query(
 		`SELECT id, name, type, description, scopes, api_key_id, creator_id, status, created_at, updated_at,
-		        COALESCE(provider, ''), COALESCE(model, ''), COALESCE(first_seen_host, '')
+		        COALESCE(provider, ''), COALESCE(model, ''), COALESCE(tool, ''), COALESCE(first_seen_host, '')
 		 FROM agents ORDER BY created_at DESC`,
 	)
 	if err != nil {
@@ -280,7 +282,7 @@ func (d *DB) ListAgents() ([]*Agent, error) {
 	var agents []*Agent
 	for rows.Next() {
 		a := &Agent{}
-		if err := rows.Scan(&a.ID, &a.Name, &a.Type, &a.Description, &a.Scopes, &a.ApiKeyID, &a.CreatorID, &a.Status, &a.CreatedAt, &a.UpdatedAt, &a.Provider, &a.Model, &a.FirstSeenHost); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &a.Type, &a.Description, &a.Scopes, &a.ApiKeyID, &a.CreatorID, &a.Status, &a.CreatedAt, &a.UpdatedAt, &a.Provider, &a.Model, &a.Tool, &a.FirstSeenHost); err != nil {
 			return nil, err
 		}
 		agents = append(agents, a)
@@ -427,6 +429,7 @@ func IdentityFromAgent(agent *Agent) *Identity {
 		IsAgent:   true,
 		Provider:  agent.Provider,
 		Model:     agent.Model,
+		Tool:      agent.Tool,
 	}
 }
 
@@ -441,18 +444,18 @@ func (d *DB) GetAgentByID(id string) (*Agent, error) {
 		return nil, err
 	}
 	// Load nullable migration columns
-	d.db.QueryRow("SELECT COALESCE(provider,''), COALESCE(model,''), COALESCE(first_seen_host,'') FROM agents WHERE id = ?", id).
-		Scan(&a.Provider, &a.Model, &a.FirstSeenHost)
+	d.db.QueryRow("SELECT COALESCE(provider,''), COALESCE(model,''), COALESCE(tool,''), COALESCE(first_seen_host,'') FROM agents WHERE id = ?", id).
+		Scan(&a.Provider, &a.Model, &a.Tool, &a.FirstSeenHost)
 	return a, nil
 }
 
-// UpdateAgentProvider sets the provider and first_seen_host for an agent.
+// UpdateAgentProvider sets the provider, tool, and first_seen_host for an agent.
 // Only updates if the provider is currently empty (first connection).
-func (d *DB) UpdateAgentProvider(agentID, provider, host string) error {
+func (d *DB) UpdateAgentProvider(agentID, provider, tool, host string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := d.db.Exec(
-		"UPDATE agents SET provider = ?, first_seen_host = ?, updated_at = ? WHERE id = ? AND (provider = '' OR provider IS NULL)",
-		provider, host, now, agentID,
+		"UPDATE agents SET provider = ?, tool = ?, first_seen_host = ?, updated_at = ? WHERE id = ? AND (provider = '' OR provider IS NULL)",
+		provider, tool, host, now, agentID,
 	)
 	return err
 }
