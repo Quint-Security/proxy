@@ -219,6 +219,26 @@ func DefaultSpawnPatterns() []SpawnPattern {
 			Confidence:  0.75,
 			SpawnType:   "delegation",
 		},
+
+		// --- Real-world shell/subprocess patterns ---
+		// Agents use generic tool names (Bash, shell, run, cmd, terminal)
+		// with framework-specific commands in the arguments.
+		{
+			ID:          "bash-agent-spawn",
+			Description: "Bash tool launching agent processes (Claude Code, etc.)",
+			ToolPattern: "*bash*",
+			ArgPatterns: []string{`claude`, `codex`, `gemini`, `gpt`, `anthropic`, `openai`, `agent`, `llm`, `copilot`},
+			Confidence:  0.75,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "shell-tool-spawn",
+			Description: "Shell tool launching agent processes",
+			ToolPattern: "*shell*",
+			ArgPatterns: []string{`claude`, `codex`, `gemini`, `gpt`, `anthropic`, `openai`, `agent`, `llm`, `copilot`},
+			Confidence:  0.75,
+			SpawnType:   "fork",
+		},
 		{
 			ID:          "shell-agent-spawn",
 			Description: "Shell/exec tools launching agent processes",
@@ -228,13 +248,66 @@ func DefaultSpawnPatterns() []SpawnPattern {
 			SpawnType:   "fork",
 		},
 		{
-			ID:          "subprocess-agent",
-			Description: "Subprocess/spawn launching agent processes",
-			ToolPattern: "*spawn*",
-			ArgPatterns: []string{`agent`, `assistant`, `claude`, `gpt`, `llm`, `codex`},
+			ID:          "terminal-agent-spawn",
+			Description: "Terminal/console tool launching agent processes",
+			ToolPattern: "*terminal*",
+			ArgPatterns: []string{`claude`, `codex`, `gemini`, `gpt`, `anthropic`, `openai`, `agent`, `llm`, `copilot`},
 			Confidence:  0.70,
 			SpawnType:   "fork",
 		},
+		{
+			ID:          "cmd-agent-spawn",
+			Description: "Command tool launching agent processes",
+			ToolPattern: "*command*",
+			ArgPatterns: []string{`claude`, `codex`, `gemini`, `gpt`, `anthropic`, `openai`, `agent`, `llm`, `copilot`},
+			Confidence:  0.70,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "subprocess-agent",
+			Description: "Subprocess/spawn launching agent processes",
+			ToolPattern: "*spawn*",
+			ArgPatterns: []string{`agent`, `assistant`, `claude`, `gpt`, `llm`, `codex`, `gemini`, `copilot`},
+			Confidence:  0.70,
+			SpawnType:   "fork",
+		},
+
+		// --- Framework-specific CLI spawning via any tool ---
+		// Detects when any tool (including wildcards) runs a specific
+		// framework's CLI command as a subprocess.
+		{
+			ID:          "claude-cli-spawn",
+			Description: "Any tool spawning Claude CLI as subprocess",
+			ToolPattern: "*",
+			ArgPatterns: []string{`"claude "`, `"claude\n`, `claude code`, `claude agent`, `npx @anthropic`},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "codex-cli-spawn",
+			Description: "Any tool spawning Codex CLI as subprocess",
+			ToolPattern: "*",
+			ArgPatterns: []string{`"codex "`, `"codex\n`, `codex agent`, `codex run`, `npx codex`},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "gemini-cli-spawn",
+			Description: "Any tool spawning Gemini CLI as subprocess",
+			ToolPattern: "*",
+			ArgPatterns: []string{`"gemini "`, `"gemini\n`, `gemini agent`, `gemini run`, `npx @google`},
+			Confidence:  0.80,
+			SpawnType:   "fork",
+		},
+		{
+			ID:          "interpreter-agent-spawn",
+			Description: "Python/Node interpreter launching agent scripts",
+			ToolPattern: "*",
+			ArgPatterns: []string{`python agent`, `python -m agent`, `node agent`, `npx agent`, `python claude`, `python codex`, `python gemini`},
+			Confidence:  0.65,
+			SpawnType:   "fork",
+		},
+
 		{
 			ID:          "subtask-spawn",
 			Description: "Task decomposition and subtask delegation",
@@ -478,8 +551,11 @@ func inferFramework(patternID, toolName, argsJSON string) string {
 		"openai-handoff":           "openai",
 		"claude-agent-tool":        "claude",
 		"claude-subagent":          "claude",
+		"claude-cli-spawn":         "claude",
 		"codex-spawn":              "codex",
+		"codex-cli-spawn":          "codex",
 		"gemini-function-call":     "gemini",
+		"gemini-cli-spawn":         "gemini",
 		"vertex-agent-builder":     "vertex-ai",
 		"langchain-agent-executor": "langchain",
 		"langgraph-handoff":        "langgraph",

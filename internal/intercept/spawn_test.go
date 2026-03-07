@@ -32,8 +32,16 @@ func TestDefaultSpawnPatterns_CoversMajorFrameworks(t *testing.T) {
 		"copilot-agent",
 		"a2a-delegation",
 		"generic-create-agent",
+		"bash-agent-spawn",
+		"shell-tool-spawn",
 		"shell-agent-spawn",
+		"terminal-agent-spawn",
+		"cmd-agent-spawn",
 		"subprocess-agent",
+		"claude-cli-spawn",
+		"codex-cli-spawn",
+		"gemini-cli-spawn",
+		"interpreter-agent-spawn",
 		"run-agent",
 		"invoke-assistant",
 	}
@@ -565,8 +573,8 @@ func TestLoadSpawnPatterns_EmptyPath(t *testing.T) {
 	if len(patterns) == 0 {
 		t.Error("expected default patterns for empty path")
 	}
-	if len(patterns) < 20 {
-		t.Errorf("expected at least 20 patterns, got %d", len(patterns))
+	if len(patterns) < 28 {
+		t.Errorf("expected at least 28 patterns, got %d", len(patterns))
 	}
 }
 
@@ -669,5 +677,218 @@ func TestMatchPattern_CaseInsensitive(t *testing.T) {
 	}
 	if ev.ChildHint != "alice" {
 		t.Errorf("child_hint=%s, want alice", ev.ChildHint)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Real-world subprocess detection — Claude, Codex, Gemini
+// These tests simulate the actual tool names and arguments used by each
+// framework when spawning subprocesses through the proxy.
+// ---------------------------------------------------------------------------
+
+func TestDetectSpawn_RealWorld_ClaudeBashSubprocess(t *testing.T) {
+	d := NewSpawnDetector(nil)
+
+	// Claude Code uses "Bash" tool to spawn claude CLI
+	args := `{"command":"claude code --help"}`
+	ev := d.DetectSpawn("claude-code-server", "Bash", args, "claude-agent-1")
+	if ev == nil {
+		t.Fatal("expected spawn detection for Bash tool running 'claude code'")
+	}
+	if ev.Framework != "claude" {
+		t.Errorf("framework=%s, want claude", ev.Framework)
+	}
+	if ev.SpawnType != "fork" {
+		t.Errorf("spawn_type=%s, want fork", ev.SpawnType)
+	}
+}
+
+func TestDetectSpawn_RealWorld_ClaudeBashAgent(t *testing.T) {
+	d := NewSpawnDetector(nil)
+
+	// Claude spawning another agent via bash
+	args := `{"command":"claude agent run --task 'analyze code'"}`
+	ev := d.DetectSpawn("mcp-server", "Bash", args, "claude-parent")
+	if ev == nil {
+		t.Fatal("expected spawn detection for Bash tool running 'claude agent'")
+	}
+	if ev.Framework != "claude" {
+		t.Errorf("framework=%s, want claude", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_RealWorld_CodexShellSubprocess(t *testing.T) {
+	d := NewSpawnDetector(nil)
+
+	// Codex uses "shell" tool
+	args := `{"command":"codex run --task review"}`
+	ev := d.DetectSpawn("codex-server", "shell", args, "codex-agent-1")
+	if ev == nil {
+		t.Fatal("expected spawn detection for shell tool running 'codex run'")
+	}
+	if ev.Framework != "codex" {
+		t.Errorf("framework=%s, want codex", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_RealWorld_CodexExecSubprocess(t *testing.T) {
+	d := NewSpawnDetector(nil)
+
+	// Codex via exec_command
+	args := `{"cmd":"npx codex agent --file test.py"}`
+	ev := d.DetectSpawn("code-server", "exec_command", args, "codex-parent")
+	if ev == nil {
+		t.Fatal("expected spawn detection for exec_command running 'npx codex'")
+	}
+	if ev.Framework != "codex" {
+		t.Errorf("framework=%s, want codex", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_RealWorld_GeminiShellSubprocess(t *testing.T) {
+	d := NewSpawnDetector(nil)
+
+	// Gemini using shell to spawn another agent
+	args := `{"command":"gemini agent run --model pro"}`
+	ev := d.DetectSpawn("gemini-server", "shell", args, "gemini-agent-1")
+	if ev == nil {
+		t.Fatal("expected spawn detection for shell tool running 'gemini agent'")
+	}
+	if ev.Framework != "gemini" {
+		t.Errorf("framework=%s, want gemini", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_RealWorld_GeminiBashSubprocess(t *testing.T) {
+	d := NewSpawnDetector(nil)
+
+	// Gemini via Bash tool
+	args := `{"command":"gemini run task --input data.json"}`
+	ev := d.DetectSpawn("google-ai", "Bash", args, "gemini-parent")
+	if ev == nil {
+		t.Fatal("expected spawn detection for Bash tool running 'gemini run'")
+	}
+	if ev.Framework != "gemini" {
+		t.Errorf("framework=%s, want gemini", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_RealWorld_TerminalAgentSpawn(t *testing.T) {
+	d := NewSpawnDetector(nil)
+
+	// Agent spawned via terminal tool
+	args := `{"input":"claude code review src/"}`
+	ev := d.DetectSpawn("ide-server", "terminal_exec", args, "ide-agent")
+	if ev == nil {
+		t.Fatal("expected spawn detection for terminal_exec running claude")
+	}
+	if ev.Framework != "claude" {
+		t.Errorf("framework=%s, want claude", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_RealWorld_RunCommandAgentSpawn(t *testing.T) {
+	d := NewSpawnDetector(nil)
+
+	// Agent spawned via run_command tool
+	args := `{"command":"codex agent analyze"}`
+	ev := d.DetectSpawn("server", "run_command", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn detection for run_command running codex")
+	}
+	if ev.Framework != "codex" {
+		t.Errorf("framework=%s, want codex", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_RealWorld_NoFalsePositive_BashLs(t *testing.T) {
+	d := NewSpawnDetector(nil)
+
+	// Regular bash command should NOT trigger spawn detection
+	args := `{"command":"ls -la /tmp"}`
+	ev := d.DetectSpawn("server", "Bash", args, "agent")
+	if ev != nil {
+		t.Errorf("expected no spawn for 'ls -la', got pattern=%s", ev.PatternID)
+	}
+}
+
+func TestDetectSpawn_RealWorld_NoFalsePositive_ShellGrep(t *testing.T) {
+	d := NewSpawnDetector(nil)
+
+	// Regular shell command should NOT trigger
+	args := `{"command":"grep -r 'TODO' src/"}`
+	ev := d.DetectSpawn("server", "shell", args, "agent")
+	if ev != nil {
+		t.Errorf("expected no spawn for 'grep', got pattern=%s", ev.PatternID)
+	}
+}
+
+func TestDetectSpawn_RealWorld_ClaudeCliSpawn_WildcardTool(t *testing.T) {
+	d := NewSpawnDetector(nil)
+
+	// The claude-cli-spawn pattern uses "*" tool pattern, catching ANY tool
+	// that runs claude CLI commands in arguments
+	args := `{"script":"claude code --task 'fix bug'"}`
+	ev := d.DetectSpawn("custom-server", "run_script", args, "orchestrator")
+	if ev == nil {
+		t.Fatal("expected claude-cli-spawn to catch 'claude code' in any tool")
+	}
+	if ev.Framework != "claude" {
+		t.Errorf("framework=%s, want claude", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_RealWorld_NpxAnthropicSpawn(t *testing.T) {
+	d := NewSpawnDetector(nil)
+
+	// npx @anthropic packages
+	args := `{"command":"npx @anthropic/claude-agent run"}`
+	ev := d.DetectSpawn("server", "Bash", args, "parent")
+	if ev == nil {
+		t.Fatal("expected spawn detection for npx @anthropic")
+	}
+	if ev.Framework != "claude" {
+		t.Errorf("framework=%s, want claude", ev.Framework)
+	}
+}
+
+func TestDetectSpawn_RealWorld_DefaultPatterns_NewIDs(t *testing.T) {
+	patterns := DefaultSpawnPatterns()
+	idSet := make(map[string]bool)
+	for _, p := range patterns {
+		idSet[p.ID] = true
+	}
+
+	newIDs := []string{
+		"bash-agent-spawn",
+		"shell-tool-spawn",
+		"terminal-agent-spawn",
+		"cmd-agent-spawn",
+		"claude-cli-spawn",
+		"codex-cli-spawn",
+		"gemini-cli-spawn",
+		"interpreter-agent-spawn",
+	}
+	for _, id := range newIDs {
+		if !idSet[id] {
+			t.Errorf("missing new pattern: %s", id)
+		}
+	}
+}
+
+func TestInferFramework_NewCLIPatterns(t *testing.T) {
+	tests := []struct {
+		patternID string
+		want      string
+	}{
+		{"claude-cli-spawn", "claude"},
+		{"codex-cli-spawn", "codex"},
+		{"gemini-cli-spawn", "gemini"},
+	}
+	for _, tt := range tests {
+		got := inferFramework(tt.patternID, "", "")
+		if got != tt.want {
+			t.Errorf("inferFramework(%q) = %q, want %q", tt.patternID, got, tt.want)
+		}
 	}
 }
