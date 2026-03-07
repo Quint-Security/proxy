@@ -1,0 +1,16 @@
+[Unit]
+Description=Quint Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/quint daemon
+Restart=always
+RestartSec=5
+User=root
+StandardOutput=append:/var/log/quint/agent.log
+StandardError=append:/var/log/quint/agent.err
+
+[Install]
+WantedBy=multi-user.target
