@@ -26,11 +26,21 @@ import (
 	"github.com/Quint-Security/quint-proxy/internal/stream"
 )
 
+// EventInfo carries event data for external consumers (e.g. cloud forwarding).
+type EventInfo struct {
+	Action    string
+	Agent     string
+	RiskScore *int
+	Blocked   bool
+	Timestamp time.Time
+}
+
 // Options configures the forward proxy.
 type Options struct {
 	Port    int
 	Policy  intercept.PolicyConfig
 	DataDir string
+	OnEvent func(EventInfo) // optional callback for each intercepted request event
 }
 
 // Proxy is the HTTP forward proxy server with MITM TLS interception.
@@ -718,6 +728,15 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		AgentDepth:    &agentDepth,
 		ParentAgentID: parentAgentID,
 	})
+	if p.opts.OnEvent != nil {
+		p.opts.OnEvent(EventInfo{
+			Action:    action,
+			Agent:     agentName,
+			RiskScore: &riskScore,
+			Blocked:   false,
+			Timestamp: time.Now(),
+		})
+	}
 
 	// Forward the request — stream body directly to upstream
 	outReq, err := http.NewRequest(r.Method, r.URL.String(), forwardBody)
@@ -908,6 +927,15 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		AgentDepth:    &agentDepth,
 		ParentAgentID: parentAgentID,
 	})
+	if p.opts.OnEvent != nil {
+		p.opts.OnEvent(EventInfo{
+			Action:    action,
+			Agent:     agentName,
+			RiskScore: &riskScore,
+			Blocked:   false,
+			Timestamp: time.Now(),
+		})
+	}
 
 	p.sessionTracker.Record(subjectID, action)
 
@@ -1139,6 +1167,15 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 			AgentDepth:    &agentDepth,
 			ParentAgentID: parentAgentID,
 		})
+		if p.opts.OnEvent != nil {
+			p.opts.OnEvent(EventInfo{
+				Action:    action,
+				Agent:     agentName,
+				RiskScore: &riskScore,
+				Blocked:   riskAction == "deny",
+				Timestamp: time.Now(),
+			})
+		}
 
 		if riskAction == "deny" {
 			// Send a 403 back to the client through the TLS connection
@@ -1243,6 +1280,15 @@ func (p *Proxy) logAndDeny(w http.ResponseWriter, domain, method, action, target
 		RiskScore:     &riskScore,
 		RiskLevel:     &riskLevel,
 	})
+	if p.opts.OnEvent != nil {
+		p.opts.OnEvent(EventInfo{
+			Action:    action,
+			Agent:     "",
+			RiskScore: &riskScore,
+			Blocked:   true,
+			Timestamp: time.Now(),
+		})
+	}
 	qlog.Info("denied %s %s (%s)", method, target, reason)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusForbidden)

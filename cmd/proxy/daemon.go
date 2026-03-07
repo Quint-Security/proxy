@@ -162,6 +162,25 @@ func runDaemon(args []string) {
 		Port:    port,
 		Policy:  policy,
 		DataDir: dataDir,
+		OnEvent: func(info forwardproxy.EventInfo) {
+			score := 0
+			if info.RiskScore != nil {
+				score = *info.RiskScore
+			}
+			verdict := "allow"
+			if info.Blocked {
+				verdict = "deny"
+			}
+			forwarder.Enqueue(cloud.EventPayload{
+				EventID:   fmt.Sprintf("evt-%d", info.Timestamp.UnixMilli()),
+				Timestamp: info.Timestamp.UTC().Format(time.RFC3339),
+				EventType: "forward_proxy",
+				AgentID:   info.Agent,
+				ToolName:  info.Action,
+				RiskScore: score,
+				Verdict:   verdict,
+			})
+		},
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "quint: failed to create forward proxy: %v\n", err)
