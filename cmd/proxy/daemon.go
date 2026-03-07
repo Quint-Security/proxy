@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -114,6 +115,12 @@ func runDaemon(args []string) {
 	qlog.SetLevel(logLevel)
 
 	dataDir := intercept.ResolveDataDir(policy.DataDir)
+
+	// Daemon mode: if dataDir is still relative (e.g. LaunchDaemon running as root
+	// with no HOME), force an absolute path so CA/audit can be created.
+	if !filepath.IsAbs(dataDir) {
+		dataDir = "/var/lib/quint"
+	}
 
 	if port == 0 {
 		port = 9090

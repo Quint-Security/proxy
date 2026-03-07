@@ -6,7 +6,9 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 
+	"github.com/Quint-Security/quint-proxy/internal/cloud"
 	qcrypto "github.com/Quint-Security/quint-proxy/internal/crypto"
 	"github.com/Quint-Security/quint-proxy/internal/dashboard"
 	"github.com/Quint-Security/quint-proxy/internal/forwardproxy"
@@ -16,8 +18,12 @@ import (
 
 // runWatch handles: quint watch [flags]
 // Starts an HTTP/HTTPS forward proxy with MITM TLS interception + API server.
+// If a deploy token is available (--token, QUINT_DEPLOY_TOKEN, or config file),
+// also registers with the cloud and forwards events.
 func runWatch(args []string) {
 	var policyPath string
+	var tokenFlag string
+	var apiURLFlag string
 	var port, apiPort int
 
 	for i := 0; i < len(args); i++ {
@@ -36,6 +42,16 @@ func runWatch(args []string) {
 			i++
 			if i < len(args) {
 				apiPort, _ = strconv.Atoi(args[i])
+			}
+		case "--token":
+			i++
+			if i < len(args) {
+				tokenFlag = args[i]
+			}
+		case "--api-url":
+			i++
+			if i < len(args) {
+				apiURLFlag = args[i]
 			}
 		case "--no-dashboard", "--no-open", "--static-dir":
 			// Ignored for backward compatibility
@@ -60,11 +76,88 @@ func runWatch(args []string) {
 	qlog.SetLevel(policy.LogLevel)
 	dataDir := intercept.ResolveDataDir(policy.DataDir)
 
-	proxy, err := forwardproxy.New(forwardproxy.Options{
+	// --- Cloud push (opt-in via --token or QUINT_DEPLOY_TOKEN) ---
+	deployToken := tokenFlag
+	if deployToken == "" {
+		deployToken = os.Getenv("QUINT_DEPLOY_TOKEN")
+	}
+
+	cloudAPIURL := apiURLFlag
+	if cloudAPIURL == "" {
+		cloudAPIURL = os.Getenv("QUINT_API_URL")
+	}
+	if cloudAPIURL == "" {
+		cloudAPIURL = cloud.DefaultAPIURL
+	}
+
+	var forwarder *cloud.Forwarder
+	var heartbeatStop chan struct{}
+	var heartbeatDone chan struct{}
+
+	if deployToken != "" {
+		client := cloud.NewClient(cloudAPIURL, deployToken)
+		if err := client.Register(version); err != nil {
+			qlog.Warn("cloud registration failed (continuing without cloud): %v", err)
+		} else {
+			forwarder = cloud.NewForwarder(client)
+			forwarder.Start()
+
+			// Heartbeat goroutine
+			startTime := time.Now()
+			heartbeatStop = make(chan struct{})
+			heartbeatDone = make(chan struct{})
+			go func() {
+				defer close(heartbeatDone)
+				ticker := time.NewTicker(60 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						uptime := int64(time.Since(startTime).Seconds())
+						eventsBuffered := forwarder.BufferLen()
+						if err := client.Heartbeat(version, uptime, 0, eventsBuffered); err != nil {
+							qlog.Warn("heartbeat failed: %v", err)
+						}
+					case <-heartbeatStop:
+						return
+					}
+				}
+			}()
+
+			qlog.Info("cloud push enabled: %s", cloudAPIURL)
+		}
+	}
+
+	proxyOpts := forwardproxy.Options{
 		Port:    port,
 		Policy:  policy,
 		DataDir: dataDir,
-	})
+	}
+
+	// Hook OnEvent if cloud forwarding is active
+	if forwarder != nil {
+		proxyOpts.OnEvent = func(info forwardproxy.EventInfo) {
+			score := 0
+			if info.RiskScore != nil {
+				score = *info.RiskScore
+			}
+			verdict := "allow"
+			if info.Blocked {
+				verdict = "deny"
+			}
+			forwarder.Enqueue(cloud.EventPayload{
+				EventID:   fmt.Sprintf("evt-%d", info.Timestamp.UnixMilli()),
+				Timestamp: info.Timestamp.UTC().Format(time.RFC3339),
+				EventType: "forward_proxy",
+				AgentID:   info.Agent,
+				ToolName:  info.Action,
+				RiskScore: score,
+				Verdict:   verdict,
+			})
+		}
+	}
+
+	proxy, err := forwardproxy.New(proxyOpts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "quint: failed to create forward proxy: %v\n", err)
 		os.Exit(1)
@@ -111,6 +204,15 @@ func runWatch(args []string) {
 	go func() {
 		<-sigCh
 		qlog.Info("received signal, shutting down...")
+
+		if heartbeatStop != nil {
+			close(heartbeatStop)
+			<-heartbeatDone
+		}
+		if forwarder != nil {
+			forwarder.Stop()
+		}
+
 		if apiSrv != nil {
 			apiSrv.Shutdown()
 		}
@@ -121,6 +223,13 @@ func runWatch(args []string) {
 	// Blocking — forward proxy runs in foreground
 	if err := proxy.Start(); err != nil {
 		qlog.Error("forward proxy error: %v", err)
+		if heartbeatStop != nil {
+			close(heartbeatStop)
+			<-heartbeatDone
+		}
+		if forwarder != nil {
+			forwarder.Stop()
+		}
 		if apiSrv != nil {
 			apiSrv.Shutdown()
 		}
