@@ -67,12 +67,35 @@ fi
 echo "Installing Quint Agent v${VERSION} ..."
 
 # ---------------------------------------------------------------------------
-# Download binary
+# Download binary (supports both tarball and raw binary release formats)
 # ---------------------------------------------------------------------------
-DOWNLOAD_URL="https://github.com/Quint-Security/quint-proxy/releases/download/v${VERSION}/quint-proxy-${OS}-${ARCH}"
-echo "Downloading ${DOWNLOAD_URL} ..."
-curl -fsSL -o /usr/local/bin/quint "$DOWNLOAD_URL"
+# Map arch names for Hamza's CI release format (x64 vs amd64)
+DL_ARCH="$ARCH"
+case "$ARCH" in
+  amd64) DL_ARCH="x64" ;;
+esac
+
+# Try tarball format first (v0.8.0+), fall back to raw binary (v0.7.x)
+TARBALL_URL="https://github.com/Quint-Security/quint-proxy/releases/download/v${VERSION}/quint-${OS}-${DL_ARCH}.tar.gz"
+RAW_URL="https://github.com/Quint-Security/quint-proxy/releases/download/v${VERSION}/quint-proxy-${OS}-${ARCH}"
+
+echo "Downloading quint v${VERSION} ..."
+if curl -fsSL -o /tmp/quint-download.tar.gz "$TARBALL_URL" 2>/dev/null; then
+  tar xzf /tmp/quint-download.tar.gz -C /tmp
+  mv /tmp/quint /usr/local/bin/quint
+  rm -f /tmp/quint-download.tar.gz
+elif curl -fsSL -o /usr/local/bin/quint "$RAW_URL" 2>/dev/null; then
+  : # raw binary downloaded directly
+else
+  echo "Error: failed to download quint v${VERSION}"
+  exit 1
+fi
 chmod +x /usr/local/bin/quint
+
+# Also install to homebrew path if it exists (avoid PATH shadowing)
+if [ -d "/opt/homebrew/bin" ]; then
+  cp /usr/local/bin/quint /opt/homebrew/bin/quint 2>/dev/null || true
+fi
 
 # ---------------------------------------------------------------------------
 # Create directories
@@ -114,6 +137,9 @@ case "$OS" in
 </dict>
 </plist>
 PLIST
+    # Unload first in case it's already installed (ignore errors)
+    launchctl unload /Library/LaunchDaemons/dev.quintai.agent.plist 2>/dev/null || true
+    mkdir -p /var/lib/quint
     launchctl load /Library/LaunchDaemons/dev.quintai.agent.plist
     echo "Installed macOS LaunchDaemon: dev.quintai.agent"
     ;;
@@ -163,25 +189,41 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
   sleep 1
 done
 
-if [ "$OS" = "darwin" ] && [ -f "$CA_CERT" ]; then
-  security add-trusted-cert -d -r trustRoot \
-    -k /Library/Keychains/System.keychain "$CA_CERT" 2>/dev/null && \
-    echo "Trusted CA certificate in macOS Keychain" || \
-    echo "Warning: could not add CA to Keychain (may need manual trust)"
+if [ -f "$CA_CERT" ]; then
+  # Copy daemon CA to user dir (daemon runs as root, user needs readable copies)
+  REAL_USER="${SUDO_USER:-$(whoami)}"
+  REAL_HOME="$(eval echo "~${REAL_USER}")"
+  mkdir -p "${REAL_HOME}/.quint/ca"
+  cp "${DATA_DIR}/ca/quint-ca.crt" "${REAL_HOME}/.quint/ca/quint-ca.crt"
+  cp "${DATA_DIR}/ca/quint-ca-bundle.pem" "${REAL_HOME}/.quint/ca/quint-ca-bundle.pem" 2>/dev/null || true
+  cp "${DATA_DIR}/ca/quint-ca.key" "${REAL_HOME}/.quint/ca/quint-ca.key" 2>/dev/null || true
+  chown -R "${REAL_USER}" "${REAL_HOME}/.quint" 2>/dev/null || true
+  echo "Copied CA certs to ${REAL_HOME}/.quint/ca/"
+
+  if [ "$OS" = "darwin" ]; then
+    security add-trusted-cert -d -r trustRoot \
+      -k /Library/Keychains/System.keychain "${REAL_HOME}/.quint/ca/quint-ca.crt" 2>/dev/null && \
+      echo "Trusted CA certificate in macOS Keychain" || \
+      echo "Warning: could not add CA to Keychain (may need manual trust)"
+  fi
+else
+  echo "Warning: CA cert not generated yet. After daemon starts, run:"
+  echo "  sudo cp /var/lib/quint/ca/quint-ca.crt ~/.quint/ca/"
+  echo "  sudo cp /var/lib/quint/ca/quint-ca-bundle.pem ~/.quint/ca/"
+  echo "  sudo chown \$USER ~/.quint/ca/*"
 fi
 
 # ---------------------------------------------------------------------------
 # Shell profile injection — auto-set proxy env vars for new terminals
 # ---------------------------------------------------------------------------
-REAL_USER="${SUDO_USER:-$(whoami)}"
-REAL_HOME="$(eval echo "~${REAL_USER}")"
+# REAL_USER and REAL_HOME already set above
 
 # Write env.sh that quint env would output
 QUINT_ENV="${REAL_HOME}/.quint/env.sh"
 mkdir -p "${REAL_HOME}/.quint"
 
-BUNDLE_PATH="${DATA_DIR}/ca/quint-ca-bundle.pem"
-CERT_PATH="${DATA_DIR}/ca/quint-ca.crt"
+BUNDLE_PATH="${REAL_HOME}/.quint/ca/quint-ca-bundle.pem"
+CERT_PATH="${REAL_HOME}/.quint/ca/quint-ca.crt"
 
 cat > "$QUINT_ENV" <<ENVSH
 # Quint proxy environment — auto-generated
