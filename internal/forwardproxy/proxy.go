@@ -730,7 +730,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	outReq.Header.Del("Proxy-Connection")
 	outReq.Header.Del("Proxy-Authorization")
 	outReq.Header.Del("X-Quint-Agent")
-	outReq.Header.Set("X-Quint-Trace", tc.String())
+	outReq.Header.Del("X-Quint-Trace")
 
 	resp, err := p.transport.RoundTrip(outReq)
 	if err != nil {
@@ -1156,9 +1156,7 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 
 		// Strip quint headers before forwarding to upstream
 		req.Header.Del("X-Quint-Agent")
-
-		// Inject trace header on outgoing request
-		req.Header.Set("X-Quint-Trace", tc.String())
+		req.Header.Del("X-Quint-Trace")
 
 		// Forward request to real server (body streams through)
 		if err := req.Write(serverConn); err != nil {
