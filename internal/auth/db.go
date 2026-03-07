@@ -74,19 +74,19 @@ type ApiKey struct {
 
 // Agent represents a registered agent identity.
 type Agent struct {
-	ID            string
-	Name          string
-	Type          string
-	Description   string
-	Scopes        string
-	ApiKeyID      string
-	CreatorID     string
-	Status        string
-	CreatedAt     string
-	UpdatedAt     string
-	Provider      string
-	Model         string
-	FirstSeenHost string
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	Description   string `json:"description"`
+	Scopes        string `json:"scopes"`
+	ApiKeyID      string `json:"api_key_id"`
+	CreatorID     string `json:"creator_id"`
+	Status        string `json:"status"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+	Provider      string `json:"provider,omitempty"`
+	Model         string `json:"model,omitempty"`
+	FirstSeenHost string `json:"first_seen_host,omitempty"`
 }
 
 type AuthResult struct {
@@ -268,7 +268,8 @@ func (d *DB) GetAgentByApiKeyID(keyID string) (*Agent, error) {
 // ListAgents returns all agents.
 func (d *DB) ListAgents() ([]*Agent, error) {
 	rows, err := d.db.Query(
-		`SELECT id, name, type, description, scopes, api_key_id, creator_id, status, created_at, updated_at
+		`SELECT id, name, type, description, scopes, api_key_id, creator_id, status, created_at, updated_at,
+		        COALESCE(provider, ''), COALESCE(model, ''), COALESCE(first_seen_host, '')
 		 FROM agents ORDER BY created_at DESC`,
 	)
 	if err != nil {
@@ -279,7 +280,7 @@ func (d *DB) ListAgents() ([]*Agent, error) {
 	var agents []*Agent
 	for rows.Next() {
 		a := &Agent{}
-		if err := rows.Scan(&a.ID, &a.Name, &a.Type, &a.Description, &a.Scopes, &a.ApiKeyID, &a.CreatorID, &a.Status, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &a.Type, &a.Description, &a.Scopes, &a.ApiKeyID, &a.CreatorID, &a.Status, &a.CreatedAt, &a.UpdatedAt, &a.Provider, &a.Model, &a.FirstSeenHost); err != nil {
 			return nil, err
 		}
 		agents = append(agents, a)
