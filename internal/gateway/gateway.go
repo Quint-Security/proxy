@@ -418,8 +418,8 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 			if g.correlationEngine != nil {
 				rel := g.correlationEngine.AddSpawnEvent(spawnEvent)
 				if rel != nil {
-					qlog.Info("relationship updated: %s→%s (confidence=%.2f, depth=%d)",
-						rel.ParentAgent, rel.ChildAgent, rel.Confidence, rel.Depth)
+					qlog.Info("relationship updated: %s→%s (confidence=%.2f, depth=%d, framework=%s)",
+						rel.ParentAgent, rel.ChildAgent, rel.Confidence, rel.Depth, spawnEvent.Framework)
 
 					// Persist to audit DB
 					if g.logger != nil {
@@ -440,6 +440,21 @@ func (g *Gateway) handleToolsCall(id json.RawMessage, paramsRaw json.RawMessage)
 						})
 					}
 				}
+			}
+
+			// Persist spawn event to audit DB (was previously missing)
+			if g.logger != nil {
+				g.logger.RecordSpawnEvent(
+					spawnEvent.DetectedAt.Format(time.RFC3339),
+					spawnEvent.PatternID,
+					spawnEvent.ParentAgent,
+					spawnEvent.ChildHint,
+					spawnEvent.SpawnType,
+					spawnEvent.ToolName,
+					spawnEvent.ServerName,
+					spawnEvent.ArgumentsRef,
+					spawnEvent.Confidence,
+				)
 			}
 
 			// Publish spawn event to Kafka

@@ -11,6 +11,9 @@ import (
 	qlog "github.com/Quint-Security/quint-proxy/internal/log"
 )
 
+// relayAuditLogger holds the audit logger for relay mode spawn recording.
+var relayAuditLogger *audit.Logger
+
 func initAudit(dataDir string, policy intercept.PolicyConfig, logEntry *logEntryFunc, agentIdentity *auth.Identity) {
 	passphrase := os.Getenv("QUINT_PASSPHRASE")
 	kp, err := crypto.EnsureKeyPair(dataDir, passphrase)
@@ -32,6 +35,7 @@ func initAudit(dataDir string, policy intercept.PolicyConfig, logEntry *logEntry
 	json.Unmarshal(policyBytes, &policyMap)
 
 	logger := audit.NewLogger(db, kp.PrivateKey, kp.PublicKey, policyMap)
+	relayAuditLogger = logger
 
 	// Capture agent identity for the session lifetime
 	var agentID, agentName string
