@@ -385,8 +385,8 @@ func TestTunnelTracker_GapWithoutTrace_CreatesInferredChild(t *testing.T) {
 	}
 }
 
-func TestTunnelTracker_ReleasedTunnelsResetToParent(t *testing.T) {
-	tracker := newTunnelTracker(1) // 1ms burst
+func TestTunnelTracker_RapidReconnectReusesParent(t *testing.T) {
+	tracker := newTunnelTracker(2000) // 2s burst
 
 	db := setupTestAuthDB(t)
 	resolver := NewIdentityResolver(db)
@@ -400,18 +400,41 @@ func TestTunnelTracker_ReleasedTunnelsResetToParent(t *testing.T) {
 	// Release all tunnels
 	tracker.release(trackerKey)
 
-	// Force gap
-	tracker.mu.Lock()
-	tracker.ipState[trackerKey].lastConnect = time.Now().Add(-5 * time.Second)
-	tracker.mu.Unlock()
-
-	// Next CONNECT with 0 active tunnels + gap → should reuse parent (reconnect)
+	// Immediate reconnect (within burst window) → should reuse parent (same session)
 	id2, _, isNew := tracker.resolve(trackerKey, parentID, resolver, "claude-code/1.0", false)
 	if isNew {
-		t.Error("reconnect after all tunnels closed should not be new")
+		t.Error("rapid reconnect after all tunnels closed should not be new")
 	}
 	if id2.AgentID != parentID.AgentID {
-		t.Errorf("reconnect should use parent identity: got %q, want %q", id2.AgentName, parentID.AgentName)
+		t.Errorf("rapid reconnect should reuse parent identity: got %q, want %q", id2.AgentName, parentID.AgentName)
+	}
+}
+
+func TestTunnelTracker_GenuineGapCreatesNewSession(t *testing.T) {
+	tracker := newTunnelTracker(1) // 1ms burst
+
+	db := setupTestAuthDB(t)
+	resolver := NewIdentityResolver(db)
+	parentID := resolver.ResolveForHTTP("10.0.0.1:50001", "claude-code/1.0", "")
+
+	trackerKey := "10.0.0.1:claude-code"
+
+	// Establish parent
+	tracker.resolve(trackerKey, parentID, resolver, "claude-code/1.0", false)
+
+	// Release all tunnels and backdate sessionEndTime to simulate a real gap
+	tracker.release(trackerKey)
+	tracker.mu.Lock()
+	tracker.ipState[trackerKey].sessionEndTime = time.Now().Add(-5 * time.Second)
+	tracker.mu.Unlock()
+
+	// Next CONNECT after genuine gap → new session with new identity
+	id2, _, isNew := tracker.resolve(trackerKey, parentID, resolver, "claude-code/1.0", false)
+	if !isNew {
+		t.Error("reconnect after genuine session gap should create new session")
+	}
+	if id2.AgentID == parentID.AgentID {
+		t.Errorf("new session should have different identity, both got %q", parentID.AgentName)
 	}
 }
 
