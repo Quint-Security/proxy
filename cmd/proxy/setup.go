@@ -13,7 +13,7 @@ import (
 )
 
 // runSetup handles: quint setup
-// Interactive wizard that runs init + connect + starts the dashboard.
+// Interactive wizard that runs init + connect.
 func runSetup(args []string) {
 	reader := bufio.NewReader(os.Stdin)
 
@@ -150,7 +150,7 @@ func runSetup(args []string) {
 		fmt.Println("  Shell commands are monitored and audited.")
 		fmt.Println()
 		fmt.Println("  Next steps:")
-		fmt.Println("    quint dashboard    Open the web dashboard")
+		fmt.Println("    quint watch        Start the proxy + API server")
 		fmt.Println("    quint status       Quick health check")
 		fmt.Println("    quint verify       Verify audit trail integrity")
 		fmt.Println("    quint connect      See connected services")

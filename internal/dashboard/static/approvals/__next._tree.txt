@@ -1,3 +1,0 @@
-:HL["/_next/static/chunks/741924948c16fa5a.css","style"]
-:HL["https://api.fontshare.com/v2/css?f[]=switzer@1,2&display=swap","style"]
-0:{"buildId":"kTR8SNgvXF43UgmqaZl79","tree":{"name":"","paramType":null,"paramKey":"","hasRuntimePrefetch":false,"slots":{"children":{"name":"approvals","paramType":null,"paramKey":"approvals","hasRuntimePrefetch":false,"slots":{"children":{"name":"__PAGE__","paramType":null,"paramKey":"__PAGE__","hasRuntimePrefetch":false,"slots":null,"isRootLayout":false}},"isRootLayout":false}},"isRootLayout":true},"staleTime":300}
