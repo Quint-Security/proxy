@@ -150,6 +150,55 @@ UNIT
 esac
 
 # ---------------------------------------------------------------------------
+# macOS: Trust CA + set system proxy (zero-config interception)
+# ---------------------------------------------------------------------------
+if [ "$OS" = "darwin" ]; then
+  DATA_DIR="/var/lib/quint"
+  CA_CERT="${DATA_DIR}/ca/quint-ca.crt"
+
+  # Wait for daemon to generate CA cert (up to 10s)
+  echo "Waiting for CA certificate..."
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    if [ -f "$CA_CERT" ]; then
+      break
+    fi
+    sleep 1
+  done
+
+  if [ -f "$CA_CERT" ]; then
+    # Trust CA in macOS system keychain
+    security add-trusted-cert -d -r trustRoot \
+      -k /Library/Keychains/System.keychain "$CA_CERT" 2>/dev/null && \
+      echo "Trusted CA certificate in macOS Keychain" || \
+      echo "Warning: could not add CA to Keychain (may need manual trust)"
+
+    # Detect active network service (Wi-Fi, Ethernet, etc.)
+    NETWORK_SERVICE=""
+    for svc in "Wi-Fi" "Ethernet" "USB 10/100/1000 LAN"; do
+      if networksetup -getinfo "$svc" 2>/dev/null | grep -q "IP address"; then
+        NETWORK_SERVICE="$svc"
+        break
+      fi
+    done
+
+    if [ -n "$NETWORK_SERVICE" ]; then
+      # Set system-wide HTTP and HTTPS proxy
+      networksetup -setwebproxy "$NETWORK_SERVICE" localhost 9090 2>/dev/null
+      networksetup -setsecurewebproxy "$NETWORK_SERVICE" localhost 9090 2>/dev/null
+      echo "Set system proxy on ${NETWORK_SERVICE} → localhost:9090"
+    else
+      echo "Warning: could not detect active network — set proxy manually"
+      echo "  networksetup -setwebproxy \"Wi-Fi\" localhost 9090"
+      echo "  networksetup -setsecurewebproxy \"Wi-Fi\" localhost 9090"
+    fi
+  else
+    echo "Warning: CA cert not found at ${CA_CERT} — daemon may still be starting"
+    echo "  You can trust it manually later:"
+    echo "  sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${CA_CERT}"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Verify
 # ---------------------------------------------------------------------------
 sleep 2
@@ -160,6 +209,12 @@ if quint version >/dev/null 2>&1; then
   echo "  Config:  /etc/quint/config.yaml"
   echo "  Logs:    /var/log/quint/agent.log"
   echo "           /var/log/quint/agent.err"
+  if [ "$OS" = "darwin" ] && [ -n "$NETWORK_SERVICE" ]; then
+    echo ""
+    echo "  All traffic on ${NETWORK_SERVICE} now routes through Quint."
+    echo "  To disable: networksetup -setwebproxystate \"${NETWORK_SERVICE}\" off"
+    echo "              networksetup -setsecurewebproxystate \"${NETWORK_SERVICE}\" off"
+  fi
 else
   echo ""
   echo "Warning: 'quint version' check failed, but the binary was installed."
