@@ -908,10 +908,14 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		trackerKey, baseIdentity, p.identityResolver, r.Header.Get("User-Agent"), hasParentTrace,
 	)
 	// Debug: log tunnel state after resolve
+	resolvedAgentName := ""
+	if identity != nil {
+		resolvedAgentName = identity.AgentName
+	}
 	p.tunnelTracker.mu.Lock()
 	if st := p.tunnelTracker.ipState[trackerKey]; st != nil {
 		qlog.Debug("CONNECT resolve: key=%s agent=%s isNew=%v active=%d peak=%d baseline=%d baselineSet=%v hasParent=%v",
-			trackerKey, identity.AgentName, isNew, st.activeTunnels, st.peakTunnels, st.baseline, st.baselineSet, hasParentTrace)
+			trackerKey, resolvedAgentName, isNew, st.activeTunnels, st.peakTunnels, st.baseline, st.baselineSet, hasParentTrace)
 	}
 	p.tunnelTracker.mu.Unlock()
 	// Release this tunnel slot when serveMITM (or early return) finishes.
