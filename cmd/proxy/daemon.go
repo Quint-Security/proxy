@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -165,6 +167,76 @@ func runDaemon(args []string) {
 		}
 	}()
 
+	// --- Graph push goroutine (push agent graphs to cloud every 30s) ---
+	graphStop := make(chan struct{})
+	graphDone := make(chan struct{})
+	go func() {
+		defer close(graphDone)
+		// Wait for API server to start
+		time.Sleep(5 * time.Second)
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		pushGraphs := func() {
+			// Fetch graphs from local dashboard API
+			resp, err := http.Get(fmt.Sprintf("http://localhost:%d/api/agents/graphs", apiPort))
+			if err != nil {
+				return
+			}
+			defer resp.Body.Close()
+
+			var result struct {
+				Graphs []json.RawMessage `json:"graphs"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || len(result.Graphs) == 0 {
+				return
+			}
+
+			var payloads []cloud.GraphPayload
+			for _, raw := range result.Graphs {
+				var g struct {
+					ID            string          `json:"id"`
+					RootAgentID   string          `json:"rootAgentId"`
+					RootAgentName string          `json:"rootAgentName"`
+					Status        string          `json:"status"`
+					TotalNodes    int             `json:"totalNodes"`
+					Nodes         json.RawMessage `json:"nodes"`
+					StartedAt     string          `json:"startedAt"`
+					CompletedAt   string          `json:"completedAt"`
+				}
+				if err := json.Unmarshal(raw, &g); err != nil {
+					continue
+				}
+				payloads = append(payloads, cloud.GraphPayload{
+					ID:            g.ID,
+					RootAgentID:   g.RootAgentID,
+					RootAgentName: g.RootAgentName,
+					Status:        g.Status,
+					TotalNodes:    g.TotalNodes,
+					Nodes:         raw, // send the full graph JSON as nodes
+					StartedAt:     g.StartedAt,
+					CompletedAt:   g.CompletedAt,
+				})
+			}
+
+			if len(payloads) > 0 {
+				if err := client.PushGraphs(payloads); err != nil {
+					qlog.Warn("graph push failed: %v", err)
+				}
+			}
+		}
+
+		pushGraphs() // push immediately on start
+		for {
+			select {
+			case <-ticker.C:
+				pushGraphs()
+			case <-graphStop:
+				return
+			}
+		}
+	}()
+
 	// --- Forward proxy ---
 	proxy, err := forwardproxy.New(forwardproxy.Options{
 		Port:    port,
@@ -225,6 +297,8 @@ func runDaemon(args []string) {
 		shutdownOnce.Do(func() {
 			close(heartbeatStop)
 			<-heartbeatDone
+			close(graphStop)
+			<-graphDone
 			forwarder.Stop()
 			if apiSrv != nil {
 				apiSrv.Shutdown()

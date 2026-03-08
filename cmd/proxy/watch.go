@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -92,11 +94,14 @@ func runWatch(args []string) {
 	}
 
 	var forwarder *cloud.Forwarder
+	var client *cloud.Client
 	var heartbeatStop chan struct{}
 	var heartbeatDone chan struct{}
+	var graphStop chan struct{}
+	var graphDone chan struct{}
 
 	if deployToken != "" {
-		client := cloud.NewClient(cloudAPIURL, deployToken)
+		client = cloud.NewClient(cloudAPIURL, deployToken)
 		if err := client.Register(version); err != nil {
 			qlog.Warn("cloud registration failed (continuing without cloud): %v", err)
 		} else {
@@ -120,6 +125,75 @@ func runWatch(args []string) {
 							qlog.Warn("heartbeat failed: %v", err)
 						}
 					case <-heartbeatStop:
+						return
+					}
+				}
+			}()
+
+			// Graph push goroutine (push agent graphs to cloud every 30s)
+			graphStop = make(chan struct{})
+			graphDone = make(chan struct{})
+			go func() {
+				defer close(graphDone)
+				// Wait for API server to start
+				time.Sleep(5 * time.Second)
+				ticker := time.NewTicker(30 * time.Second)
+				defer ticker.Stop()
+
+				pushGraphs := func() {
+					resp, err := http.Get(fmt.Sprintf("http://localhost:%d/api/agents/graphs", apiPort))
+					if err != nil {
+						return
+					}
+					defer resp.Body.Close()
+
+					var result struct {
+						Graphs []json.RawMessage `json:"graphs"`
+					}
+					if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || len(result.Graphs) == 0 {
+						return
+					}
+
+					var payloads []cloud.GraphPayload
+					for _, raw := range result.Graphs {
+						var g struct {
+							ID            string          `json:"id"`
+							RootAgentID   string          `json:"rootAgentId"`
+							RootAgentName string          `json:"rootAgentName"`
+							Status        string          `json:"status"`
+							TotalNodes    int             `json:"totalNodes"`
+							Nodes         json.RawMessage `json:"nodes"`
+							StartedAt     string          `json:"startedAt"`
+							CompletedAt   string          `json:"completedAt"`
+						}
+						if err := json.Unmarshal(raw, &g); err != nil {
+							continue
+						}
+						payloads = append(payloads, cloud.GraphPayload{
+							ID:            g.ID,
+							RootAgentID:   g.RootAgentID,
+							RootAgentName: g.RootAgentName,
+							Status:        g.Status,
+							TotalNodes:    g.TotalNodes,
+							Nodes:         raw,
+							StartedAt:     g.StartedAt,
+							CompletedAt:   g.CompletedAt,
+						})
+					}
+
+					if len(payloads) > 0 {
+						if err := client.PushGraphs(payloads); err != nil {
+							qlog.Warn("graph push failed: %v", err)
+						}
+					}
+				}
+
+				pushGraphs()
+				for {
+					select {
+					case <-ticker.C:
+						pushGraphs()
+					case <-graphStop:
 						return
 					}
 				}
@@ -197,6 +271,10 @@ func runWatch(args []string) {
 			if heartbeatStop != nil {
 				close(heartbeatStop)
 				<-heartbeatDone
+			}
+			if graphStop != nil {
+				close(graphStop)
+				<-graphDone
 			}
 			if forwarder != nil {
 				forwarder.Stop()

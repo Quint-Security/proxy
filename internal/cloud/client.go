@@ -204,6 +204,56 @@ func (c *Client) PushEvents(events []EventPayload) error {
 	return nil
 }
 
+// GraphPayload is a single agent graph to push to the cloud.
+type GraphPayload struct {
+	ID            string          `json:"id"`
+	RootAgentID   string          `json:"root_agent_id"`
+	RootAgentName string          `json:"root_agent_name"`
+	Status        string          `json:"status"`
+	TotalNodes    int             `json:"total_nodes"`
+	Nodes         json.RawMessage `json:"nodes"`
+	StartedAt     string          `json:"started_at"`
+	CompletedAt   string          `json:"completed_at,omitempty"`
+}
+
+type graphsRequest struct {
+	Graphs []GraphPayload `json:"graphs"`
+}
+
+// PushGraphs sends agent graph data to the cloud API.
+func (c *Client) PushGraphs(graphs []GraphPayload) error {
+	if c.cloudUUID == "" {
+		return fmt.Errorf("not registered (no cloud UUID)")
+	}
+
+	body := graphsRequest{Graphs: graphs}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal graphs: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v1/machines/%s/graphs", c.apiURL, c.cloudUUID)
+	req, err := http.NewRequest("POST", url, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("create graphs request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("graphs request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("graphs push returned status %d", resp.StatusCode)
+	}
+
+	qlog.Debug("pushed %d graphs to cloud", len(graphs))
+	return nil
+}
+
 // generateMachineID produces a deterministic machine identifier from
 // hostname, OS, and architecture: sha256(hostname:os:arch) truncated to 32 hex chars.
 func generateMachineID() string {
