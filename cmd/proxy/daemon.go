@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -218,42 +219,33 @@ func runDaemon(args []string) {
 
 	qlog.Info("daemon running: proxy=:%d, api=:%d, cloud=%s", port, apiPort, daemonCfg.APIURL)
 
-	// --- Signal handling ---
+	// --- Coordinated shutdown (used by both signal handler and error path) ---
+	var shutdownOnce sync.Once
+	shutdown := func() {
+		shutdownOnce.Do(func() {
+			close(heartbeatStop)
+			<-heartbeatDone
+			forwarder.Stop()
+			if apiSrv != nil {
+				apiSrv.Shutdown()
+			}
+			proxy.Close()
+		})
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		<-sigCh
 		qlog.Info("received signal, shutting down daemon...")
-
-		// Stop heartbeat
-		close(heartbeatStop)
-		<-heartbeatDone
-
-		// Stop event forwarder (flushes remaining events)
-		forwarder.Stop()
-
-		// Shutdown API server
-		if apiSrv != nil {
-			apiSrv.Shutdown()
-		}
-
-		// Close proxy
-		proxy.Close()
-
+		shutdown()
 		os.Exit(0)
 	}()
 
 	// Blocking — forward proxy runs in foreground
 	if err := proxy.Start(); err != nil {
 		qlog.Error("forward proxy error: %v", err)
-
-		close(heartbeatStop)
-		<-heartbeatDone
-		forwarder.Stop()
-		if apiSrv != nil {
-			apiSrv.Shutdown()
-		}
-		proxy.Close()
+		shutdown()
 		os.Exit(1)
 	}
 }
