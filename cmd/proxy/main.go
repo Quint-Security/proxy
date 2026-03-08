@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -44,81 +43,27 @@ func main() {
 	// Check for subcommands before flag parsing
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		// Primary commands — the ones a new user sees
-		case "setup":
-			runSetup(os.Args[2:])
-			return
-		case "start":
-			runStart(os.Args[2:])
-			return
-		case "status":
-			runStatus(os.Args[2:])
+		case "daemon":
+			runDaemon(os.Args[2:])
 			return
 		case "watch":
 			runWatch(os.Args[2:])
 			return
-		case "daemon":
-			runDaemon(os.Args[2:])
-			return
 		case "env":
 			runEnv(os.Args[2:])
 			return
-		case "export":
-			runExport(os.Args[2:])
+		case "status":
+			runStatus(os.Args[2:])
 			return
-		case "shell":
-			runShell(os.Args[2:])
-			return
-
-		// Admin — advanced commands behind a subcommand
-		case "admin":
-			runAdmin(os.Args[2:])
-			return
-
-		// Version
 		case "--version", "version":
 			fmt.Println(version)
-			return
-
-		// Backward compat: advanced commands still work without "admin" prefix
-		case "init":
-			runInit(os.Args[2:])
-			return
-		case "agent":
-			runAgent(os.Args[2:])
-			return
-		case "verify":
-			runVerify(os.Args[2:])
-			return
-		case "approve":
-			runApprove(os.Args[2:])
-			return
-		case "deny":
-			runDeny(os.Args[2:])
-			return
-		case "approvals":
-			runApprovals(os.Args[2:])
-			return
-		case "sync":
-			runSync(os.Args[2:])
-			return
-		case "http-proxy":
-			runHTTPProxy(os.Args[2:])
 			return
 		}
 	}
 
-	// No args: show status if configured, or setup prompt
+	// No args or unknown command: show help
 	if len(os.Args) == 1 {
-		home, _ := os.UserHomeDir()
-		quintDir := filepath.Join(home, ".quint")
-		if _, err := os.Stat(quintDir); err == nil {
-			runStatus(nil)
-		} else {
-			fmt.Println("Quint — Security gateway for AI agents")
-			fmt.Println()
-			fmt.Println("Run `quint setup` to get started.")
-		}
+		printUsage()
 		return
 	}
 
@@ -127,24 +72,7 @@ func main() {
 	policyPath := flag.String("policy", "", "Path to policy.json or directory containing it")
 	agentName := flag.String("agent", "", "Agent name for identity resolution (or set QUINT_AGENT)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Quint — Security gateway for AI agents\n\n")
-		fmt.Fprintf(os.Stderr, "Commands:\n")
-		fmt.Fprintf(os.Stderr, "  quint setup              Interactive setup wizard\n")
-		fmt.Fprintf(os.Stderr, "  quint start              Run the gateway\n")
-		fmt.Fprintf(os.Stderr, "  quint status             Health check\n")
-		fmt.Fprintf(os.Stderr, "  quint watch              HTTP/HTTPS forward proxy + API server\n")
-		fmt.Fprintf(os.Stderr, "    --port <port>          Proxy port (default 9090)\n")
-		fmt.Fprintf(os.Stderr, "    --api-port <port>      API server port (default 8080)\n")
-		fmt.Fprintf(os.Stderr, "  quint daemon              Run as system daemon (enterprise)\n")
-		fmt.Fprintf(os.Stderr, "  quint env                Print proxy env vars (use: eval $(quint env))\n")
-		fmt.Fprintf(os.Stderr, "  quint export             Export audit proof bundle\n\n")
-		fmt.Fprintf(os.Stderr, "Advanced:\n")
-		fmt.Fprintf(os.Stderr, "  quint admin <command>    Run an advanced command (quint admin --help)\n\n")
-		fmt.Fprintf(os.Stderr, "Stdio proxy mode:\n")
-		fmt.Fprintf(os.Stderr, "  quint --name <server> -- <command> [args...]\n\n")
-		fmt.Fprintf(os.Stderr, "https://github.com/Quint-Security/proxy\n")
-	}
+	flag.Usage = printUsage
 	flag.Parse()
 
 	if *showVersion {
@@ -554,6 +482,20 @@ func handleChildMessage(line string, serverName string, logEntry logEntryFunc, _
 	method, msgID, respJSON := intercept.InspectResponse(line)
 	logEntry(serverName, "response", method, msgID, "", "", respJSON, string(intercept.VerdictPassthrough), nil, nil, nil)
 	return line
+}
+
+func printUsage() {
+	fmt.Fprintf(os.Stderr, "Quint — Security gateway for AI agents\n\n")
+	fmt.Fprintf(os.Stderr, "Commands:\n")
+	fmt.Fprintf(os.Stderr, "  quint daemon             Run as system daemon\n")
+	fmt.Fprintf(os.Stderr, "  quint watch              Interactive proxy (foreground)\n")
+	fmt.Fprintf(os.Stderr, "  quint env                Print proxy env vars (eval $(quint env))\n")
+	fmt.Fprintf(os.Stderr, "  quint status             Health check\n")
+	fmt.Fprintf(os.Stderr, "  quint version            Print version\n\n")
+	fmt.Fprintf(os.Stderr, "MCP stdio proxy:\n")
+	fmt.Fprintf(os.Stderr, "  quint --name <server> -- <command> [args...]\n\n")
+	fmt.Fprintf(os.Stderr, "Install:\n")
+	fmt.Fprintf(os.Stderr, "  curl -fsSL https://get.quintai.dev | sudo sh -s -- --token <token>\n\n")
 }
 
 // cleanup closes databases. Populated by initAudit/initRisk.
