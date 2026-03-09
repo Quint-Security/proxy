@@ -5,33 +5,31 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	qlog "github.com/Quint-Security/quint-proxy/internal/log"
 )
 
-// passthroughDomains are non-AI domains that should NOT be MITM'd.
-// These get a blind TCP tunnel — the proxy can see the domain (from CONNECT)
-// but cannot read or modify the encrypted traffic.
-// AI provider domains are intentionally NOT listed here — they are MITM'd
-// so we can parse LLM tool calls from request bodies.
-var passthroughDomains = []string{
-	// npm registry (not AI, needed for tooling)
-	"registry.npmjs.org",
-	// GitHub Copilot binary streaming (not chat API)
-	"copilot-proxy.githubusercontent.com",
-	// Railway CLI internal traffic (doesn't trust Quint CA)
-	"backboard.railway.com",
+// tlsFailedDomains tracks domains where TLS handshake failed (client doesn't
+// trust our CA). These auto-fallback to blind tunnel on subsequent connections.
+// No hardcoded passthrough list needed — domains are learned at runtime.
+var (
+	tlsFailedDomains sync.Map // domain (string) → time.Time (first failure)
+)
+
+// MarkTLSFailed records that a domain's TLS handshake failed, so future
+// connections to this domain will use blind tunnel instead of MITM.
+func MarkTLSFailed(domain string) {
+	tlsFailedDomains.Store(domain, time.Now())
+	qlog.Info("auto-passthrough: %s (TLS handshake failed, will bypass MITM)", domain)
 }
 
 // isPassthroughDomain returns true if the domain should bypass MITM.
+// Domains are auto-learned from TLS handshake failures — no hardcoded list.
 func isPassthroughDomain(domain string) bool {
-	for _, d := range passthroughDomains {
-		if domain == d || strings.HasSuffix(domain, "."+d) {
-			return true
-		}
-	}
-	return false
+	_, failed := tlsFailedDomains.Load(domain)
+	return failed
 }
 
 // llmProviderDomains are AI provider API endpoints that should be MITM'd
