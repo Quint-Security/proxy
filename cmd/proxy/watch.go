@@ -238,7 +238,10 @@ func runWatch(args []string) {
 			})
 		}
 		proxyOpts.OnToolCall = func(evt forwardproxy.AgentToolEvent) {
-			agent := evt.Agent
+			agent := evt.ProcessName
+			if agent == "" {
+				agent = evt.Agent
+			}
 			if agent == "" && evt.Provider != "" {
 				agent = evt.Provider
 			}
