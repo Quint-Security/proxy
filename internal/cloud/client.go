@@ -49,12 +49,13 @@ type heartbeatRequest struct {
 // EventPayload is a single event to push to the cloud.
 // Field names match the quint-api EventInput schema.
 type EventPayload struct {
-	EventID   string `json:"event_id"`
-	Action    string `json:"action"`
-	Agent     string `json:"agent"`
-	Timestamp string `json:"timestamp"`
-	RiskScore *int   `json:"risk_score,omitempty"`
-	Blocked   bool   `json:"blocked"`
+	EventID   string            `json:"event_id"`
+	Action    string            `json:"action"`
+	Agent     string            `json:"agent"`
+	Timestamp string            `json:"timestamp"`
+	RiskScore *int              `json:"risk_score,omitempty"`
+	Blocked   bool              `json:"blocked"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
 // eventsRequest is the body sent to POST /v1/machines/{id}/events.
@@ -221,6 +222,7 @@ type graphsRequest struct {
 }
 
 // PushGraphs sends agent graph data to the cloud API.
+// Retries once on failure with a 2-second delay.
 func (c *Client) PushGraphs(graphs []GraphPayload) error {
 	if c.cloudUUID == "" {
 		return fmt.Errorf("not registered (no cloud UUID)")
@@ -233,25 +235,32 @@ func (c *Client) PushGraphs(graphs []GraphPayload) error {
 	}
 
 	url := fmt.Sprintf("%s/v1/machines/%s/graphs", c.apiURL, c.cloudUUID)
-	req, err := http.NewRequest("POST", url, bytes.NewReader(data))
-	if err != nil {
-		return fmt.Errorf("create graphs request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("graphs request failed: %w", err)
-	}
-	defer resp.Body.Close()
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			time.Sleep(2 * time.Second)
+		}
+		req, err := http.NewRequest("POST", url, bytes.NewReader(data))
+		if err != nil {
+			return fmt.Errorf("create graphs request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+c.token)
+		req.Header.Set("Content-Type", "application/json")
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("graphs push returned status %d", resp.StatusCode)
+		resp, err := c.http.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("graphs request failed: %w", err)
+			continue
+		}
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
+			qlog.Debug("pushed %d graphs to cloud", len(graphs))
+			return nil
+		}
+		lastErr = fmt.Errorf("graphs push returned status %d", resp.StatusCode)
 	}
-
-	qlog.Debug("pushed %d graphs to cloud", len(graphs))
-	return nil
+	return lastErr
 }
 
 // generateMachineID produces a deterministic machine identifier from

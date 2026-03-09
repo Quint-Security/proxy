@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -212,6 +213,10 @@ func runWatch(args []string) {
 	// Hook OnEvent and OnToolCall if cloud forwarding is active
 	if forwarder != nil {
 		proxyOpts.OnEvent = func(info forwardproxy.EventInfo) {
+			// Skip TLS handshake noise — adds no value to cloud events
+			if strings.Contains(info.Action, "connect.root") {
+				return
+			}
 			forwarder.Enqueue(cloud.EventPayload{
 				EventID:   fmt.Sprintf("evt-%d", info.Timestamp.UnixMilli()),
 				Action:    info.Action,
@@ -222,13 +227,40 @@ func runWatch(args []string) {
 			})
 		}
 		proxyOpts.OnToolCall = func(evt forwardproxy.AgentToolEvent) {
+			agent := evt.Agent
+			if agent == "" && evt.Provider != "" {
+				agent = evt.Provider
+			}
+			if agent == "" && evt.Model != "" {
+				agent = evt.Model
+			}
+
+			metadata := map[string]string{}
+			if evt.ToolArgs != "" {
+				metadata["args"] = evt.ToolArgs
+			}
+			if evt.ToolResult != "" {
+				result := evt.ToolResult
+				if len(result) > 1024 {
+					result = result[:1024] + "..."
+				}
+				metadata["result"] = result
+			}
+			if evt.Model != "" {
+				metadata["model"] = evt.Model
+			}
+			if evt.Provider != "" {
+				metadata["provider"] = evt.Provider
+			}
+
 			forwarder.Enqueue(cloud.EventPayload{
 				EventID:   evt.EventID,
 				Action:    fmt.Sprintf("tool:%s", evt.ToolName),
-				Agent:     evt.Agent,
+				Agent:     agent,
 				Timestamp: evt.Timestamp.UTC().Format(time.RFC3339),
 				RiskScore: &evt.RiskScore,
 				Blocked:   evt.Blocked,
+				Metadata:  metadata,
 			})
 		}
 	}

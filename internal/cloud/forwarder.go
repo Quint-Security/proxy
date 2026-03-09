@@ -105,6 +105,18 @@ func (f *Forwarder) flush() {
 	f.buffer = f.buffer[n:]
 	f.mu.Unlock()
 
+	// Deduplicate: keep only the first occurrence per action+agent key
+	seen := make(map[string]bool)
+	deduped := make([]EventPayload, 0, len(batch))
+	for _, e := range batch {
+		key := e.Action + "|" + e.Agent
+		if !seen[key] {
+			seen[key] = true
+			deduped = append(deduped, e)
+		}
+	}
+	batch = deduped
+
 	// Retry with exponential backoff
 	backoff := initialBackoff
 	for attempt := 0; attempt <= maxRetries; attempt++ {

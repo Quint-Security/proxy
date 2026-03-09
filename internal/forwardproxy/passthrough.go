@@ -20,6 +20,8 @@ var passthroughDomains = []string{
 	"registry.npmjs.org",
 	// GitHub Copilot binary streaming (not chat API)
 	"copilot-proxy.githubusercontent.com",
+	// Railway CLI internal traffic (doesn't trust Quint CA)
+	"backboard.railway.com",
 }
 
 // isPassthroughDomain returns true if the domain should bypass MITM.
