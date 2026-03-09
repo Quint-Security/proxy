@@ -28,8 +28,9 @@ var knownAgentNames = map[string]string{
 }
 
 func lookupPort(port int) *ProcessInfo {
-	// Get PID from lsof
-	out, err := exec.Command("lsof", "-i", ":"+strconv.Itoa(port), "-P", "-n", "-F", "p", "-sTCP:ESTABLISHED").Output()
+	// Use lsof to find the process that owns the ephemeral source port.
+	// Format: lsof -i :PORT will match both source and destination ports.
+	out, err := exec.Command("lsof", "-i", ":"+strconv.Itoa(port), "-P", "-n", "-F", "p").Output()
 	if err != nil {
 		return nil
 	}
@@ -45,12 +46,11 @@ func lookupPort(port int) *ProcessInfo {
 		return nil
 	}
 
-	// Get process name from ps (NOT lsof — lsof sometimes returns version strings)
+	// Get process name from ps (reliable, unlike lsof's 'c' field)
 	name := ""
 	cmdPath := ""
 	if nameOut, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output(); err == nil {
 		cmdPath = strings.TrimSpace(string(nameOut))
-		// Extract just the binary name from the full path
 		name = cmdPath
 		if idx := strings.LastIndex(name, "/"); idx >= 0 {
 			name = name[idx+1:]
@@ -74,7 +74,6 @@ func lookupPort(port int) *ProcessInfo {
 		}
 	}
 
-	// Use whatever we got
 	return &ProcessInfo{PID: pid, ProcessName: name, ProcessPath: cmdPath}
 }
 
