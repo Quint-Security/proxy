@@ -1036,7 +1036,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		Certificates: []tls.Certificate{*leafCert},
 	})
 	if err := tlsClientConn.Handshake(); err != nil {
-		qlog.Error("client TLS handshake for %s: %v", hostname, err)
+		qlog.Debug("client TLS handshake for %s: %v", hostname, err)
 		// Auto-learn: mark this domain for passthrough on future connections
 		MarkTLSFailed(hostname)
 		clientConn.Close()

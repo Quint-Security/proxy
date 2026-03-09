@@ -168,7 +168,7 @@ func OpenDB(dataDir string) (*DB, error) {
 func Open(dbPath string) (*DB, error) {
 	// Set busy_timeout via pragma to handle concurrent access from
 	// multiple proxy instances sharing the same DB file.
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout%3d5000")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout%3d15000")
 	if err != nil {
 		return nil, fmt.Errorf("open audit db: %w", err)
 	}

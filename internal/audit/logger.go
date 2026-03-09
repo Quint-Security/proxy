@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"sync"
 	"encoding/json"
 	"time"
 
@@ -10,6 +11,8 @@ import (
 )
 
 // Logger produces signed, chain-linked audit entries.
+var auditErrOnce sync.Once
+
 type Logger struct {
 	db         *DB
 	privateKey string
@@ -176,7 +179,10 @@ func (l *Logger) Log(opts LogOpts) {
 		}
 	})
 	if err != nil {
-		qlog.Error("failed to insert audit entry: %v", err)
+		// Rate-limit this error — it spams under heavy concurrent writes
+		auditErrOnce.Do(func() {
+			qlog.Warn("audit insert errors occurring (SQLite busy) — some entries may be delayed")
+		})
 	}
 }
 

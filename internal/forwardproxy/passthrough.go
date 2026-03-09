@@ -11,31 +11,57 @@ import (
 	qlog "github.com/Quint-Security/quint-proxy/internal/log"
 )
 
-// tlsFailedDomains tracks domains where TLS handshake failed (client doesn't
-// trust our CA). These auto-fallback to blind tunnel on subsequent connections.
-// No hardcoded passthrough list needed — domains are learned at runtime.
+const (
+	// passthrough TTL — auto-learned domains expire after 1 hour.
+	// If the CA gets trusted (e.g. user re-runs install), the domain
+	// will be MITM'd again after the TTL expires.
+	passthroughTTL = 1 * time.Hour
+)
+
+// tlsFailedDomains tracks domains where TLS handshake failed.
+// Auto-fallback to blind tunnel on subsequent connections.
 var (
 	tlsFailedDomains sync.Map // domain (string) → time.Time (first failure)
+
+	// tlsErrorCooldown prevents log spam — only log once per domain per minute
+	tlsErrorLogged sync.Map // domain (string) → time.Time (last logged)
 )
 
 // MarkTLSFailed records that a domain's TLS handshake failed, so future
 // connections to this domain will use blind tunnel instead of MITM.
+// Logs the event at most once per minute per domain to prevent spam.
 func MarkTLSFailed(domain string) {
 	tlsFailedDomains.Store(domain, time.Now())
-	qlog.Info("auto-passthrough: %s (TLS handshake failed, will bypass MITM)", domain)
+
+	// Rate-limit the log message
+	if lastLog, ok := tlsErrorLogged.Load(domain); ok {
+		if time.Since(lastLog.(time.Time)) < time.Minute {
+			return // already logged recently
+		}
+	}
+	tlsErrorLogged.Store(domain, time.Now())
+	qlog.Info("auto-passthrough: %s (TLS failed, bypassing MITM for %v)", domain, passthroughTTL)
 }
 
 // isPassthroughDomain returns true if the domain should bypass MITM.
-// Domains are auto-learned from TLS handshake failures — no hardcoded list.
+// Domains are auto-learned from TLS handshake failures with a TTL.
 func isPassthroughDomain(domain string) bool {
-	_, failed := tlsFailedDomains.Load(domain)
-	return failed
+	v, ok := tlsFailedDomains.Load(domain)
+	if !ok {
+		return false
+	}
+	failedAt := v.(time.Time)
+	if time.Since(failedAt) > passthroughTTL {
+		// TTL expired — try MITM again
+		tlsFailedDomains.Delete(domain)
+		tlsErrorLogged.Delete(domain)
+		return false
+	}
+	return true
 }
 
 // llmProviderDomains are AI provider API endpoints that should be MITM'd
-// for LLM conversation parsing (tool call extraction), but should NOT be
-// scored/blocked as regular HTTP traffic. Instead, parsed tool calls are
-// emitted via the OnToolCall callback.
+// for LLM conversation parsing (tool call extraction).
 var llmProviderDomains = []string{
 	"api.anthropic.com",
 	"api.openai.com",
@@ -43,9 +69,7 @@ var llmProviderDomains = []string{
 	"api.mistral.ai",
 }
 
-// isLLMProviderDomain returns true if the domain is an AI provider API
-// endpoint that should be parsed for LLM tool calls instead of being
-// treated as regular HTTP traffic.
+// isLLMProviderDomain returns true if the domain is an AI provider API.
 func isLLMProviderDomain(domain string) bool {
 	domain = strings.ToLower(domain)
 	for _, d := range llmProviderDomains {
@@ -53,7 +77,6 @@ func isLLMProviderDomain(domain string) bool {
 			return true
 		}
 	}
-	// Catch all AWS Bedrock runtime regions (bedrock-runtime.*.amazonaws.com)
 	if strings.HasPrefix(domain, "bedrock-runtime.") && strings.HasSuffix(domain, ".amazonaws.com") {
 		return true
 	}
@@ -61,7 +84,6 @@ func isLLMProviderDomain(domain string) bool {
 }
 
 // blindTunnel establishes a raw TCP tunnel without TLS interception.
-// The client and server negotiate TLS directly — the proxy just copies bytes.
 func (p *Proxy) blindTunnel(w http.ResponseWriter, r *http.Request, host string) {
 	upstream, err := net.DialTimeout("tcp", host, 10*time.Second)
 	if err != nil {
@@ -84,7 +106,6 @@ func (p *Proxy) blindTunnel(w http.ResponseWriter, r *http.Request, host string)
 	defer clientConn.Close()
 
 	clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
-	qlog.Debug("passthrough tunnel: %s", host)
 
 	done := make(chan struct{}, 2)
 	go func() { io.Copy(upstream, clientConn); done <- struct{}{} }()
