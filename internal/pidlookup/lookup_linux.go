@@ -43,6 +43,14 @@ func lookupPort(port int) *ProcessInfo {
 	}
 }
 
+func lookupPortExcluding(port int, excludePID int) *ProcessInfo {
+	info := lookupPort(port)
+	if info != nil && info.PID == excludePID {
+		return nil
+	}
+	return info
+}
+
 func findInodeByPort(port int) string {
 	data, err := os.ReadFile("/proc/net/tcp")
 	if err != nil {

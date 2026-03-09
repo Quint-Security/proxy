@@ -8,13 +8,11 @@ import (
 	"strings"
 )
 
-// genericProcessNames are process names that don't identify the actual tool.
 var genericProcessNames = map[string]bool{
 	"node": true, "npm": true, "npx": true, "python": true, "python3": true,
 	"ruby": true, "java": true, "deno": true, "bun": true, "ts-node": true,
 }
 
-// knownAgentNames maps process names to canonical agent identifiers.
 var knownAgentNames = map[string]string{
 	"claude":   "claude-code",
 	"cursor":   "cursor",
@@ -28,25 +26,36 @@ var knownAgentNames = map[string]string{
 }
 
 func lookupPort(port int) *ProcessInfo {
-	// Use lsof to find the process that owns the ephemeral source port.
-	// Format: lsof -i :PORT will match both source and destination ports.
+	return lookupPortExcluding(port, 0)
+}
+
+// lookupPortExcluding finds the process owning a port, skipping excludePID.
+func lookupPortExcluding(port int, excludePID int) *ProcessInfo {
 	out, err := exec.Command("lsof", "-i", ":"+strconv.Itoa(port), "-P", "-n", "-F", "p").Output()
 	if err != nil {
 		return nil
 	}
 
+	// Collect all PIDs that match, skip excludePID
 	var pid int
 	for _, line := range strings.Split(string(out), "\n") {
 		if len(line) > 1 && line[0] == 'p' {
-			pid, _ = strconv.Atoi(line[1:])
-			break
+			p, _ := strconv.Atoi(line[1:])
+			if p != 0 && p != excludePID {
+				pid = p
+				break
+			}
 		}
 	}
 	if pid == 0 {
 		return nil
 	}
 
-	// Get process name from ps (reliable, unlike lsof's 'c' field)
+	return resolveProcess(pid)
+}
+
+// resolveProcess gets the process name and walks the tree if needed.
+func resolveProcess(pid int) *ProcessInfo {
 	name := ""
 	cmdPath := ""
 	if nameOut, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output(); err == nil {
@@ -56,7 +65,6 @@ func lookupPort(port int) *ProcessInfo {
 			name = name[idx+1:]
 		}
 	}
-
 	if name == "" {
 		return nil
 	}
@@ -67,7 +75,7 @@ func lookupPort(port int) *ProcessInfo {
 		return &ProcessInfo{PID: pid, ProcessName: agentName, ProcessPath: cmdPath}
 	}
 
-	// If generic (node, python, etc.), walk up the tree
+	// If generic, walk up the tree
 	if genericProcessNames[lower] {
 		if resolvedName, resolvedPID := walkParentTree(pid, 5); resolvedName != "" {
 			return &ProcessInfo{PID: resolvedPID, ProcessName: resolvedName, ProcessPath: cmdPath}
@@ -77,7 +85,6 @@ func lookupPort(port int) *ProcessInfo {
 	return &ProcessInfo{PID: pid, ProcessName: name, ProcessPath: cmdPath}
 }
 
-// walkParentTree walks up the process tree looking for a known agent.
 func walkParentTree(pid int, maxDepth int) (string, int) {
 	currentPID := pid
 	for i := 0; i < maxDepth; i++ {
