@@ -248,6 +248,16 @@ func runDaemon(args []string) {
 			if strings.Contains(info.Action, "connect.root") {
 				return
 			}
+			metadata := map[string]string{}
+			if info.ProcessName != "" {
+				metadata["process_name"] = info.ProcessName
+			}
+			if info.ProcessPID > 0 {
+				metadata["process_pid"] = strconv.Itoa(info.ProcessPID)
+			}
+			if info.ProcessPath != "" {
+				metadata["process_path"] = info.ProcessPath
+			}
 			forwarder.Enqueue(cloud.EventPayload{
 				EventID:   fmt.Sprintf("evt-%d", info.Timestamp.UnixMilli()),
 				Action:    info.Action,
@@ -255,6 +265,7 @@ func runDaemon(args []string) {
 				Timestamp: info.Timestamp.UTC().Format(time.RFC3339),
 				RiskScore: info.RiskScore,
 				Blocked:   info.Blocked,
+				Metadata:  metadata,
 			})
 		},
 		OnToolCall: func(evt forwardproxy.AgentToolEvent) {
@@ -282,6 +293,12 @@ func runDaemon(args []string) {
 			}
 			if evt.Provider != "" {
 				metadata["provider"] = evt.Provider
+			}
+			if evt.ProcessName != "" {
+				metadata["process_name"] = evt.ProcessName
+			}
+			if evt.ProcessPID > 0 {
+				metadata["process_pid"] = strconv.Itoa(evt.ProcessPID)
 			}
 
 			forwarder.Enqueue(cloud.EventPayload{

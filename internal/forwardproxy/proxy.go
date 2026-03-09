@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,17 +24,21 @@ import (
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
 	"github.com/Quint-Security/quint-proxy/internal/llmparse"
 	qlog "github.com/Quint-Security/quint-proxy/internal/log"
+	"github.com/Quint-Security/quint-proxy/internal/pidlookup"
 	"github.com/Quint-Security/quint-proxy/internal/risk"
 	"github.com/Quint-Security/quint-proxy/internal/stream"
 )
 
 // EventInfo carries event data for external consumers (e.g. cloud forwarding).
 type EventInfo struct {
-	Action    string
-	Agent     string
-	RiskScore *int
-	Blocked   bool
-	Timestamp time.Time
+	Action      string
+	Agent       string
+	RiskScore   *int
+	Blocked     bool
+	Timestamp   time.Time
+	ProcessPID  int
+	ProcessName string
+	ProcessPath string
 }
 
 // AgentToolEvent carries a parsed LLM tool call extracted from AI provider traffic.
@@ -80,6 +85,7 @@ type Proxy struct {
 	agentTraces       sync.Map // agentID (string) → *intercept.TraceContext
 	tunnelTracker     *tunnelTracker
 	agentCookieStore  *agentCookieStore
+	pidLookup         *pidlookup.Lookup
 }
 
 // tunnelTracker detects new agent instances and child subprocesses by monitoring
@@ -531,6 +537,7 @@ func New(opts Options) (*Proxy, error) {
 		correlationEngine: intercept.NewCorrelationEngine(),
 		tunnelTracker:     newTunnelTracker(2000),
 		agentCookieStore:  newAgentCookieStore(),
+		pidLookup:         pidlookup.New(30 * time.Second),
 		transport: &http.Transport{
 			Proxy:               nil, // never inherit HTTP_PROXY/HTTPS_PROXY from env
 			TLSClientConfig:     &tls.Config{},
@@ -681,6 +688,23 @@ func (p *Proxy) resolveParentFromTrace(r *http.Request) (parentAgentID string, t
 
 // handleHTTP forwards plain HTTP requests with full inspection.
 func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
+	// PID lookup — identify which process is making this connection
+	var processName, processPath string
+	var processPID int
+	if p.pidLookup != nil {
+		if portStr := r.RemoteAddr; portStr != "" {
+			if idx := strings.LastIndex(portStr, ":"); idx != -1 {
+				if port, err := strconv.Atoi(portStr[idx+1:]); err == nil {
+					if info := p.pidLookup.LookupByPort(port); info != nil {
+						processPID = info.PID
+						processName = info.ProcessName
+						processPath = info.ProcessPath
+					}
+				}
+			}
+		}
+	}
+
 	// Detect provider from request host for proper agent naming.
 	provider := InferProvider(r.Host)
 	identity := p.resolveProxyAuthOrAgent(r)
@@ -785,11 +809,14 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 	if p.opts.OnEvent != nil {
 		p.opts.OnEvent(EventInfo{
-			Action:    action,
-			Agent:     agentName,
-			RiskScore: &riskScore,
-			Blocked:   false,
-			Timestamp: time.Now(),
+			Action:      action,
+			Agent:       agentName,
+			RiskScore:   &riskScore,
+			Blocked:     false,
+			Timestamp:   time.Now(),
+			ProcessPID:  processPID,
+			ProcessName: processName,
+			ProcessPath: processPath,
 		})
 	}
 
@@ -878,6 +905,23 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	ip := r.RemoteAddr
 	if idx := strings.LastIndex(ip, ":"); idx != -1 {
 		ip = ip[:idx]
+	}
+
+	// PID lookup — identify which process is making this connection
+	var processName, processPath string
+	var processPID int
+	if p.pidLookup != nil {
+		if portStr := r.RemoteAddr; portStr != "" {
+			if idx := strings.LastIndex(portStr, ":"); idx != -1 {
+				if port, err := strconv.Atoi(portStr[idx+1:]); err == nil {
+					if info := p.pidLookup.LookupByPort(port); info != nil {
+						processPID = info.PID
+						processName = info.ProcessName
+						processPath = info.ProcessPath
+					}
+				}
+			}
+		}
 	}
 
 	// Detect destination domain and API provider FIRST so we can resolve
@@ -997,11 +1041,14 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	})
 	if p.opts.OnEvent != nil {
 		p.opts.OnEvent(EventInfo{
-			Action:    action,
-			Agent:     agentName,
-			RiskScore: &riskScore,
-			Blocked:   false,
-			Timestamp: time.Now(),
+			Action:      action,
+			Agent:       agentName,
+			RiskScore:   &riskScore,
+			Blocked:     false,
+			Timestamp:   time.Now(),
+			ProcessPID:  processPID,
+			ProcessName: processName,
+			ProcessPath: processPath,
 		})
 	}
 
@@ -1058,7 +1105,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Serve HTTP on the decrypted connection — read requests, inspect, forward
-	p.serveMITM(tlsClientConn, serverConn, identity, parentAgentID, incomingTrace, trackerKey)
+	p.serveMITM(tlsClientConn, serverConn, identity, parentAgentID, incomingTrace, trackerKey, processPID, processName, processPath)
 }
 
 // serveMITM reads HTTP requests from the decrypted client connection,
@@ -1066,7 +1113,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 // Identity and trace are resolved by handleConnect before this is called.
 // parentAgentID and incomingTrace are from the CONNECT request's X-Quint-Trace header.
 // trackerKey is the tunnel tracker key (ip:tool:provider) for model confirmation.
-func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identity, parentAgentID string, incomingTrace *intercept.TraceContext, trackerKey string) {
+func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identity, parentAgentID string, incomingTrace *intercept.TraceContext, trackerKey string, processPID int, processName, processPath string) {
 	defer clientConn.Close()
 	defer serverConn.Close()
 
@@ -1170,14 +1217,16 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 				if result := llmparse.Parse(domain, llmBodyBytes, req.Header.Get("User-Agent")); result != nil {
 					for _, evt := range result.Events {
 						p.opts.OnToolCall(AgentToolEvent{
-							EventID:   fmt.Sprintf("tool-%d", time.Now().UnixMilli()),
-							Timestamp: evt.Timestamp,
-							Provider:  evt.Provider,
-							Model:     result.Model,
-							Agent:     agentName,
-							ToolName:  evt.ToolName,
-							ToolArgs:  evt.ToolArgs,
-							ToolResult: evt.ToolResult,
+							EventID:     fmt.Sprintf("tool-%d", time.Now().UnixMilli()),
+							Timestamp:   evt.Timestamp,
+							Provider:    evt.Provider,
+							Model:       result.Model,
+							Agent:       agentName,
+							ToolName:    evt.ToolName,
+							ToolArgs:    evt.ToolArgs,
+							ToolResult:  evt.ToolResult,
+							ProcessPID:  processPID,
+							ProcessName: processName,
 						})
 					}
 				}
@@ -1288,11 +1337,14 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 		// above (from parsed request bodies). Skip OnEvent to avoid duplicate events.
 		if !isLLM && p.opts.OnEvent != nil {
 			p.opts.OnEvent(EventInfo{
-				Action:    action,
-				Agent:     agentName,
-				RiskScore: &riskScore,
-				Blocked:   riskAction == "deny",
-				Timestamp: time.Now(),
+				Action:      action,
+				Agent:       agentName,
+				RiskScore:   &riskScore,
+				Blocked:     riskAction == "deny",
+				Timestamp:   time.Now(),
+				ProcessPID:  processPID,
+				ProcessName: processName,
+				ProcessPath: processPath,
 			})
 		}
 
