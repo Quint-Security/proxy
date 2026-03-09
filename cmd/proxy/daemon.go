@@ -252,6 +252,16 @@ func runDaemon(args []string) {
 				Blocked:   info.Blocked,
 			})
 		},
+		OnToolCall: func(evt forwardproxy.AgentToolEvent) {
+			forwarder.Enqueue(cloud.EventPayload{
+				EventID:   evt.EventID,
+				Action:    fmt.Sprintf("tool:%s", evt.ToolName),
+				Agent:     evt.Agent,
+				Timestamp: evt.Timestamp.UTC().Format(time.RFC3339),
+				RiskScore: &evt.RiskScore,
+				Blocked:   evt.Blocked,
+			})
+		},
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "quint: failed to create forward proxy: %v\n", err)

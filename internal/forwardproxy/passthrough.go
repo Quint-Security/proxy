@@ -10,34 +10,16 @@ import (
 	qlog "github.com/Quint-Security/quint-proxy/internal/log"
 )
 
-// passthroughDomains are AI provider APIs that should NOT be MITM'd.
+// passthroughDomains are non-AI domains that should NOT be MITM'd.
 // These get a blind TCP tunnel — the proxy can see the domain (from CONNECT)
 // but cannot read or modify the encrypted traffic.
+// AI provider domains are intentionally NOT listed here — they are MITM'd
+// so we can parse LLM tool calls from request bodies.
 var passthroughDomains = []string{
-	// Anthropic
-	"api.anthropic.com",
-	"anthropic.com",
-	// OpenAI
-	"api.openai.com",
-	"openai.com",
-	// Google
-	"generativelanguage.googleapis.com",
-	// GitHub Copilot
-	"api.githubcopilot.com",
-	"copilot-proxy.githubusercontent.com",
-	// AWS Bedrock (Claude via API Billing)
-	"bedrock-runtime.us-east-1.amazonaws.com",
-	"bedrock-runtime.us-west-2.amazonaws.com",
-	"bedrock-runtime.eu-west-1.amazonaws.com",
-	"bedrock.us-east-1.amazonaws.com",
-	"bedrock.us-west-2.amazonaws.com",
-	// Cursor
-	"api.cursor.com",
-	"api2.cursor.sh",
-	// Amazon CodeWhisperer
-	"codewhisperer.amazonaws.com",
-	// npm registry (not AI but needed for tooling)
+	// npm registry (not AI, needed for tooling)
 	"registry.npmjs.org",
+	// GitHub Copilot binary streaming (not chat API)
+	"copilot-proxy.githubusercontent.com",
 }
 
 // isPassthroughDomain returns true if the domain should bypass MITM.
@@ -47,8 +29,32 @@ func isPassthroughDomain(domain string) bool {
 			return true
 		}
 	}
-	// Catch all AWS Bedrock regions
-	if strings.Contains(domain, "bedrock") && strings.HasSuffix(domain, ".amazonaws.com") {
+	return false
+}
+
+// llmProviderDomains are AI provider API endpoints that should be MITM'd
+// for LLM conversation parsing (tool call extraction), but should NOT be
+// scored/blocked as regular HTTP traffic. Instead, parsed tool calls are
+// emitted via the OnToolCall callback.
+var llmProviderDomains = []string{
+	"api.anthropic.com",
+	"api.openai.com",
+	"generativelanguage.googleapis.com",
+	"api.mistral.ai",
+}
+
+// isLLMProviderDomain returns true if the domain is an AI provider API
+// endpoint that should be parsed for LLM tool calls instead of being
+// treated as regular HTTP traffic.
+func isLLMProviderDomain(domain string) bool {
+	domain = strings.ToLower(domain)
+	for _, d := range llmProviderDomains {
+		if domain == d || strings.HasSuffix(domain, "."+d) {
+			return true
+		}
+	}
+	// Catch all AWS Bedrock runtime regions (bedrock-runtime.*.amazonaws.com)
+	if strings.HasPrefix(domain, "bedrock-runtime.") && strings.HasSuffix(domain, ".amazonaws.com") {
 		return true
 	}
 	return false

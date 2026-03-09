@@ -21,6 +21,7 @@ import (
 	"github.com/Quint-Security/quint-proxy/internal/auth"
 	"github.com/Quint-Security/quint-proxy/internal/crypto"
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
+	"github.com/Quint-Security/quint-proxy/internal/llmparse"
 	qlog "github.com/Quint-Security/quint-proxy/internal/log"
 	"github.com/Quint-Security/quint-proxy/internal/risk"
 	"github.com/Quint-Security/quint-proxy/internal/stream"
@@ -35,12 +36,29 @@ type EventInfo struct {
 	Timestamp time.Time
 }
 
+// AgentToolEvent carries a parsed LLM tool call extracted from AI provider traffic.
+type AgentToolEvent struct {
+	EventID     string
+	Timestamp   time.Time
+	Provider    string
+	Model       string
+	Agent       string
+	ToolName    string
+	ToolArgs    string
+	ToolResult  string
+	RiskScore   int
+	Blocked     bool
+	ProcessPID  int
+	ProcessName string
+}
+
 // Options configures the forward proxy.
 type Options struct {
-	Port    int
-	Policy  intercept.PolicyConfig
-	DataDir string
-	OnEvent func(EventInfo) // optional callback for each intercepted request event
+	Port       int
+	Policy     intercept.PolicyConfig
+	DataDir    string
+	OnEvent    func(EventInfo)      // optional callback for each intercepted request event
+	OnToolCall func(AgentToolEvent) // optional callback for parsed LLM tool calls
 }
 
 // Proxy is the HTTP forward proxy server with MITM TLS interception.
@@ -1107,19 +1125,61 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 		host := req.Host
 		domain := intercept.StripPort(host)
 		action := intercept.ClassifyHTTPAction(req.Method, host, req.URL.Path)
+		isLLM := isLLMProviderDomain(domain)
 
-		// Read a capped preview for logging/scoring; stream the full body to upstream
+		// Read request body: for LLM provider domains, buffer the full body
+		// so we can parse tool calls. For other domains, read a capped preview.
 		maxBody := p.maxBodyLogSize()
 		var bodyPreview string
+		var llmBodyBytes []byte
 		if req.Body != nil {
-			previewBuf, _ := io.ReadAll(io.LimitReader(req.Body, int64(maxBody+1)))
-			if len(previewBuf) > maxBody {
-				bodyPreview = string(previewBuf[:maxBody]) + "..."
+			if isLLM {
+				// Buffer full body for LLM parsing — cap at 10MB to avoid OOM
+				const maxLLMBody = 10 * 1024 * 1024
+				llmBodyBytes, _ = io.ReadAll(io.LimitReader(req.Body, maxLLMBody))
+				// Use the buffered body as the preview too (capped)
+				if len(llmBodyBytes) > maxBody {
+					bodyPreview = string(llmBodyBytes[:maxBody]) + "..."
+				} else {
+					bodyPreview = string(llmBodyBytes)
+				}
+				// Reconstruct body from buffer for forwarding
+				req.Body = io.NopCloser(bytes.NewReader(llmBodyBytes))
 			} else {
-				bodyPreview = string(previewBuf)
+				previewBuf, _ := io.ReadAll(io.LimitReader(req.Body, int64(maxBody+1)))
+				if len(previewBuf) > maxBody {
+					bodyPreview = string(previewBuf[:maxBody]) + "..."
+				} else {
+					bodyPreview = string(previewBuf)
+				}
+				// Reconstruct full body: already-read preview + remaining (streamed)
+				req.Body = io.NopCloser(io.MultiReader(bytes.NewReader(previewBuf), req.Body))
 			}
-			// Reconstruct full body: already-read preview + remaining (streamed)
-			req.Body = io.NopCloser(io.MultiReader(bytes.NewReader(previewBuf), req.Body))
+		}
+
+		// Parse LLM tool calls from buffered body (read-only, does not modify traffic).
+		if isLLM && len(llmBodyBytes) > 0 && p.opts.OnToolCall != nil {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						qlog.Error("llmparse panic for %s: %v", domain, r)
+					}
+				}()
+				if result := llmparse.Parse(domain, llmBodyBytes, req.Header.Get("User-Agent")); result != nil {
+					for _, evt := range result.Events {
+						p.opts.OnToolCall(AgentToolEvent{
+							EventID:   fmt.Sprintf("tool-%d", time.Now().UnixMilli()),
+							Timestamp: evt.Timestamp,
+							Provider:  evt.Provider,
+							Model:     result.Model,
+							Agent:     agentName,
+							ToolName:  evt.ToolName,
+							ToolArgs:  evt.ToolArgs,
+							ToolResult: evt.ToolResult,
+						})
+					}
+				}
+			}()
 		}
 
 		// Classify unregistered agent on first event: detect provider from
@@ -1222,7 +1282,9 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 			AgentDepth:    &agentDepth,
 			ParentAgentID: parentAgentID,
 		})
-		if p.opts.OnEvent != nil {
+		// For LLM provider domains, tool call events are emitted via OnToolCall
+		// above (from parsed request bodies). Skip OnEvent to avoid duplicate events.
+		if !isLLM && p.opts.OnEvent != nil {
 			p.opts.OnEvent(EventInfo{
 				Action:    action,
 				Agent:     agentName,

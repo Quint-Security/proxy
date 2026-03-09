@@ -209,7 +209,7 @@ func runWatch(args []string) {
 		DataDir: dataDir,
 	}
 
-	// Hook OnEvent if cloud forwarding is active
+	// Hook OnEvent and OnToolCall if cloud forwarding is active
 	if forwarder != nil {
 		proxyOpts.OnEvent = func(info forwardproxy.EventInfo) {
 			forwarder.Enqueue(cloud.EventPayload{
@@ -219,6 +219,16 @@ func runWatch(args []string) {
 				Timestamp: info.Timestamp.UTC().Format(time.RFC3339),
 				RiskScore: info.RiskScore,
 				Blocked:   info.Blocked,
+			})
+		}
+		proxyOpts.OnToolCall = func(evt forwardproxy.AgentToolEvent) {
+			forwarder.Enqueue(cloud.EventPayload{
+				EventID:   evt.EventID,
+				Action:    fmt.Sprintf("tool:%s", evt.ToolName),
+				Agent:     evt.Agent,
+				Timestamp: evt.Timestamp.UTC().Format(time.RFC3339),
+				RiskScore: &evt.RiskScore,
+				Blocked:   evt.Blocked,
 			})
 		}
 	}
