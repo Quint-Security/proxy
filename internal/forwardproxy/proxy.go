@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Quint-Security/quint-proxy/internal/agentdetect"
 	"github.com/Quint-Security/quint-proxy/internal/audit"
 	"github.com/Quint-Security/quint-proxy/internal/auth"
 	"github.com/Quint-Security/quint-proxy/internal/crypto"
@@ -39,6 +40,7 @@ type EventInfo struct {
 	ProcessPID  int
 	ProcessName string
 	ProcessPath string
+	Platform    string // detected AI platform: "claude-code", "cursor", etc.
 }
 
 // AgentToolEvent carries a parsed LLM tool call extracted from AI provider traffic.
@@ -55,6 +57,23 @@ type AgentToolEvent struct {
 	Blocked     bool
 	ProcessPID  int
 	ProcessName string
+	Platform    string // detected AI platform: "claude-code", "cursor", etc.
+}
+
+// EnforcementResult is the output of cloud policy evaluation, used by the
+// proxy to decide whether to block, flag, or allow a request.
+type EnforcementResult struct {
+	Action     string // "allow", "block", "flag", "require_approval"
+	PolicyID   string // ID of the matching policy (empty if no match)
+	PolicyName string // Name of the matching policy
+	RuleIndex  int    // Index of the matching rule within the policy (-1 if no match)
+}
+
+// CloudEnforcer is the interface for cloud policy enforcement, allowing
+// the forward proxy to evaluate tool calls against cloud policies without
+// importing the cloud package directly.
+type CloudEnforcer interface {
+	Evaluate(toolName, agentName, argsJSON string) EnforcementResult
 }
 
 // Options configures the forward proxy.
@@ -64,6 +83,7 @@ type Options struct {
 	DataDir    string
 	OnEvent    func(EventInfo)      // optional callback for each intercepted request event
 	OnToolCall func(AgentToolEvent) // optional callback for parsed LLM tool calls
+	Enforcer   CloudEnforcer        // cloud enforcement policies (nil = no cloud enforcement)
 }
 
 // Proxy is the HTTP forward proxy server with MITM TLS interception.
@@ -86,6 +106,7 @@ type Proxy struct {
 	tunnelTracker     *tunnelTracker
 	agentCookieStore  *agentCookieStore
 	pidLookup         *pidlookup.Lookup
+	agentDetector     *agentdetect.Detector
 }
 
 // tunnelTracker detects new agent instances and child subprocesses by monitoring
@@ -538,6 +559,7 @@ func New(opts Options) (*Proxy, error) {
 		tunnelTracker:     newTunnelTracker(2000),
 		agentCookieStore:  newAgentCookieStore(),
 		pidLookup:         pidlookup.New(30 * time.Second),
+		agentDetector:     agentdetect.NewDetector(),
 		transport: &http.Transport{
 			Proxy:               nil, // never inherit HTTP_PROXY/HTTPS_PROXY from env
 			TLSClientConfig:     &tls.Config{},
@@ -772,6 +794,16 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		// Reconstruct full body: already-read preview + remaining (streamed)
 		forwardBody = io.MultiReader(bytes.NewReader(previewBuf), r.Body)
 		defer r.Body.Close()
+	}
+
+	// Cloud policy enforcement — check before risk scoring
+	if p.opts.Enforcer != nil {
+		enforcement := p.opts.Enforcer.Evaluate(action, agentName, bodyPreview)
+		if enforcement.Action == "block" {
+			p.logAndDeny(w, domain, r.Method, action, r.URL.String(),
+				fmt.Sprintf("cloud_policy:%s", enforcement.PolicyName))
+			return
+		}
 	}
 
 	// Risk scoring — only score on action pattern, not body content.
@@ -1216,6 +1248,10 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 				}()
 				if result := llmparse.Parse(domain, llmBodyBytes, req.Header.Get("User-Agent")); result != nil {
 					for _, evt := range result.Events {
+						toolPlatform := ""
+						if identity != nil && agentdetect.IsSpecificPlatform(identity.Tool) {
+							toolPlatform = identity.Tool
+						}
 						p.opts.OnToolCall(AgentToolEvent{
 							EventID:     fmt.Sprintf("tool-%d", time.Now().UnixMilli()),
 							Timestamp:   evt.Timestamp,
@@ -1227,6 +1263,7 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 							ToolResult:  evt.ToolResult,
 							ProcessPID:  processPID,
 							ProcessName: processName,
+							Platform:    toolPlatform,
 						})
 					}
 				}
@@ -1302,6 +1339,75 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 			}
 		}
 
+		// Multi-layer agent platform detection — upgrade tool classification
+		// using system prompt, headers, and process tree in addition to UA.
+		if identity != nil && req.Method == "POST" && bodyPreview != "" {
+			detection := p.agentDetector.DetectCached(agentID, agentdetect.DetectParams{
+				UserAgent:   req.Header.Get("User-Agent"),
+				Headers:     req.Header,
+				BodyPreview: bodyPreview,
+				ProcessName: processName,
+				ProcessPath: processPath,
+				PID:         processPID,
+			})
+			if detection.Platform != "" && detection.Platform != "unknown" {
+				if !agentdetect.IsSpecificPlatform(identity.Tool) && agentdetect.IsSpecificPlatform(detection.Platform) {
+					identity.Tool = detection.Platform
+					_ = p.authDB.UpdateAgentProvider(identity.AgentID, identity.Provider, detection.Platform, domain)
+					qlog.Info("agentdetect: identified %s as platform=%s (confidence=%.2f, sources=%v)",
+						agentName, detection.Platform, detection.Confidence, detection.Sources)
+				}
+			}
+		}
+
+		// Cloud policy enforcement — check before risk scoring
+		if p.opts.Enforcer != nil {
+			enforcement := p.opts.Enforcer.Evaluate(action, agentName, bodyPreview)
+			if enforcement.Action == "block" {
+				blockedScore := 90
+				blockedLevel := "critical"
+				p.logger.Log(audit.LogOpts{
+					ServerName:    domain,
+					Direction:     "request",
+					Method:        req.Method,
+					ToolName:      action,
+					ArgumentsJSON: fmt.Sprintf(`{"url":"https://%s%s","policy":"%s"}`, host, req.URL.RequestURI(), enforcement.PolicyName),
+					Verdict:       "denied",
+					RiskScore:     &blockedScore,
+					RiskLevel:     &blockedLevel,
+					AgentID:       agentID,
+					AgentName:     agentName,
+					TraceID:       tc.TraceID,
+					AgentDepth:    &agentDepth,
+					ParentAgentID: parentAgentID,
+				})
+				if p.opts.OnEvent != nil {
+					p.opts.OnEvent(EventInfo{
+						Action:      action,
+						Agent:       agentName,
+						RiskScore:   &blockedScore,
+						Blocked:     true,
+						Timestamp:   time.Now(),
+						ProcessPID:  processPID,
+						ProcessName: processName,
+						ProcessPath: processPath,
+						Platform:    detectedPlatform,
+					})
+				}
+				resp := &http.Response{
+					StatusCode: 403,
+					Proto:      "HTTP/1.1",
+					ProtoMajor: 1,
+					ProtoMinor: 1,
+					Header:     http.Header{"Content-Type": {"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(fmt.Sprintf(`{"error":"blocked by policy","policy":"%s","tool":"%s"}`, enforcement.PolicyName, action))),
+				}
+				resp.Write(clientConn)
+				qlog.Info("cloud policy blocked MITM %s https://%s%s (policy=%s)", req.Method, host, req.URL.Path, enforcement.PolicyName)
+				continue
+			}
+		}
+
 		// Risk scoring — only score on action pattern, not body content.
 		// HTTP request bodies contain conversation text that triggers false
 		// positives on keyword patterns designed for MCP tool args.
@@ -1345,6 +1451,7 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 				ProcessPID:  processPID,
 				ProcessName: processName,
 				ProcessPath: processPath,
+				Platform:    detectedPlatform,
 			})
 		}
 

@@ -101,15 +101,20 @@ func runWatch(args []string) {
 	var graphStop chan struct{}
 	var graphDone chan struct{}
 
+	// Always create the enforcer — loads cached policies from disk so
+	// enforcement works even without cloud connectivity.
+	enforcer := cloud.NewEnforcer(dataDir)
+
 	if deployToken != "" {
 		client = cloud.NewClient(cloudAPIURL, deployToken)
 		if err := client.Register(version); err != nil {
 			qlog.Warn("cloud registration failed (continuing without cloud): %v", err)
 		} else {
+
 			forwarder = cloud.NewForwarder(client)
 			forwarder.Start()
 
-			// Heartbeat goroutine
+			// Heartbeat goroutine (with policy sync)
 			startTime := time.Now()
 			heartbeatStop = make(chan struct{})
 			heartbeatDone = make(chan struct{})
@@ -122,8 +127,18 @@ func runWatch(args []string) {
 					case <-ticker.C:
 						uptime := int64(time.Since(startTime).Seconds())
 						eventsBuffered := forwarder.BufferLen()
-						if err := client.Heartbeat(version, uptime, 0, eventsBuffered); err != nil {
-							qlog.Warn("heartbeat failed: %v", err)
+						result, hbErr := client.Heartbeat(version, uptime, 0, eventsBuffered)
+						if hbErr != nil {
+							qlog.Warn("heartbeat failed: %v", hbErr)
+						} else if result != nil && result.PolicyHash != "" && result.PolicyHash != enforcer.Hash() {
+							// Policy version changed — fetch new policies
+							policies, newHash, fetchErr := client.FetchPolicies(enforcer.Hash())
+							if fetchErr != nil {
+								qlog.Warn("policy fetch failed: %v", fetchErr)
+							} else if policies != nil {
+								enforcer.Update(policies, newHash)
+								qlog.Info("updated cloud policies: %d policies, hash=%s", len(policies), newHash)
+							}
 						}
 					case <-heartbeatStop:
 						return
@@ -205,9 +220,10 @@ func runWatch(args []string) {
 	}
 
 	proxyOpts := forwardproxy.Options{
-		Port:    port,
-		Policy:  policy,
-		DataDir: dataDir,
+		Port:     port,
+		Policy:   policy,
+		DataDir:  dataDir,
+		Enforcer: newEnforcerAdapter(enforcer), // nil if cloud is not active
 	}
 
 	// Hook OnEvent and OnToolCall if cloud forwarding is active
@@ -226,6 +242,9 @@ func runWatch(args []string) {
 			}
 			if info.ProcessPath != "" {
 				metadata["process_path"] = info.ProcessPath
+			}
+			if info.Platform != "" {
+				metadata["platform"] = info.Platform
 			}
 			forwarder.Enqueue(cloud.EventPayload{
 				EventID:   fmt.Sprintf("evt-%d", info.Timestamp.UnixMilli()),
@@ -271,6 +290,19 @@ func runWatch(args []string) {
 			}
 			if evt.ProcessPID > 0 {
 				metadata["process_pid"] = strconv.Itoa(evt.ProcessPID)
+			}
+			if evt.Platform != "" {
+				metadata["platform"] = evt.Platform
+			}
+
+			// Cloud policy enforcement metadata
+			if enforcer != nil {
+				enfResult := enforcer.Evaluate(evt.ToolName, agent, evt.ToolArgs)
+				if enfResult.PolicyID != "" {
+					metadata["policy_id"] = enfResult.PolicyID
+					metadata["policy_name"] = enfResult.PolicyName
+					metadata["enforcement_action"] = enfResult.Action
+				}
 			}
 
 			forwarder.Enqueue(cloud.EventPayload{

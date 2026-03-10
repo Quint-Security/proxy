@@ -16,19 +16,42 @@ var knownTools = []struct {
 	substring string
 	name      string
 }{
+	// CLI tools with distinctive UAs
 	{"claude-code", "claude-code"},
-	{"claude", "claude"},
-	{"cursor", "cursor"},
+	{"claude-ai", "claude-code"},
+	{"codex-cli", "codex"},
+	{"codex/", "codex"},
+	{"openai-codex", "codex"},
 	{"aider", "aider"},
+	{"gose", "goose"},
+	{"opencode", "opencode"},
+
+	// IDE extensions
+	{"cursor", "cursor"},
+	{"windsurf", "windsurf"},
+	{"codeium", "windsurf"},
 	{"continue", "continue"},
 	{"cline", "cline"},
 	{"copilot", "copilot"},
-	{"windsurf", "windsurf"},
+	{"kiro", "kiro"},
 	{"zed", "zed"},
+	{"roo-code", "roo-code"},
+	{"augment", "augment"},
+	{"void", "void"},
+	{"pear", "pearai"},
+	{"trae", "trae"},
+	{"devin", "devin"},
+	{"amp", "amp"},
+
+	// Generic — must be last, these match Claude SDK clients
+	{"claude", "claude"},
+
+	// Generic SDK UAs (low confidence, used as fallback)
 	{"python-httpx", "python-httpx"},
 	{"python-requests", "python-requests"},
 	{"go-http-client", "go-http-client"},
 	{"node-fetch", "node-fetch"},
+	{"axios", "axios"},
 	{"curl", "curl"},
 	{"wget", "wget"},
 }

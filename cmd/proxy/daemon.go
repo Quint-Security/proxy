@@ -142,11 +142,14 @@ func runDaemon(args []string) {
 		os.Exit(1)
 	}
 
+	// --- Cloud policy enforcer ---
+	enforcer := cloud.NewEnforcer(dataDir)
+
 	// --- Event forwarder ---
 	forwarder := cloud.NewForwarder(client)
 	forwarder.Start()
 
-	// --- Heartbeat goroutine ---
+	// --- Heartbeat goroutine (with policy sync) ---
 	startTime := time.Now()
 	heartbeatStop := make(chan struct{})
 	heartbeatDone := make(chan struct{})
@@ -159,8 +162,18 @@ func runDaemon(args []string) {
 			case <-ticker.C:
 				uptime := int64(time.Since(startTime).Seconds())
 				eventsBuffered := forwarder.BufferLen()
-				if err := client.Heartbeat(version, uptime, 0, eventsBuffered); err != nil {
+				result, err := client.Heartbeat(version, uptime, 0, eventsBuffered)
+				if err != nil {
 					qlog.Warn("heartbeat failed: %v", err)
+				} else if result != nil && result.PolicyHash != "" && result.PolicyHash != enforcer.Hash() {
+					// Policy version changed — fetch new policies
+					policies, newHash, fetchErr := client.FetchPolicies(enforcer.Hash())
+					if fetchErr != nil {
+						qlog.Warn("policy fetch failed: %v", fetchErr)
+					} else if policies != nil {
+						enforcer.Update(policies, newHash)
+						qlog.Info("updated cloud policies: %d policies, hash=%s", len(policies), newHash)
+					}
 				}
 			case <-heartbeatStop:
 				return
@@ -240,9 +253,10 @@ func runDaemon(args []string) {
 
 	// --- Forward proxy ---
 	proxy, err := forwardproxy.New(forwardproxy.Options{
-		Port:    port,
-		Policy:  policy,
-		DataDir: dataDir,
+		Port:     port,
+		Policy:   policy,
+		DataDir:  dataDir,
+		Enforcer: newEnforcerAdapter(enforcer),
 		OnEvent: func(info forwardproxy.EventInfo) {
 			// Skip TLS handshake noise — adds no value to cloud events
 			if strings.Contains(info.Action, "connect.root") {
@@ -257,6 +271,9 @@ func runDaemon(args []string) {
 			}
 			if info.ProcessPath != "" {
 				metadata["process_path"] = info.ProcessPath
+			}
+			if info.Platform != "" {
+				metadata["platform"] = info.Platform
 			}
 			forwarder.Enqueue(cloud.EventPayload{
 				EventID:   fmt.Sprintf("evt-%d", info.Timestamp.UnixMilli()),
@@ -302,6 +319,19 @@ func runDaemon(args []string) {
 			}
 			if evt.ProcessPID > 0 {
 				metadata["process_pid"] = strconv.Itoa(evt.ProcessPID)
+			}
+			if evt.Platform != "" {
+				metadata["platform"] = evt.Platform
+			}
+
+			// Cloud policy enforcement metadata
+			if enforcer != nil {
+				enfResult := enforcer.Evaluate(evt.ToolName, agent, evt.ToolArgs)
+				if enfResult.PolicyID != "" {
+					metadata["policy_id"] = enfResult.PolicyID
+					metadata["policy_name"] = enfResult.PolicyName
+					metadata["enforcement_action"] = enfResult.Action
+				}
 			}
 
 			forwarder.Enqueue(cloud.EventPayload{

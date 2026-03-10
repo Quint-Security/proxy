@@ -131,10 +131,17 @@ func (c *Client) Register(version string) error {
 	return nil
 }
 
-// Heartbeat sends a heartbeat to the cloud API.
-func (c *Client) Heartbeat(version string, uptime int64, activeAgents, eventsToday int) error {
+// HeartbeatResult holds the parsed heartbeat response.
+type HeartbeatResult struct {
+	ConfigVersion string `json:"config_version"`
+	PolicyHash    string `json:"policy_hash"`
+}
+
+// Heartbeat sends a heartbeat to the cloud API and returns the response
+// (including policy_hash for change detection).
+func (c *Client) Heartbeat(version string, uptime int64, activeAgents, eventsToday int) (*HeartbeatResult, error) {
 	if c.cloudUUID == "" {
-		return fmt.Errorf("not registered (no cloud UUID)")
+		return nil, fmt.Errorf("not registered (no cloud UUID)")
 	}
 
 	body := heartbeatRequest{
@@ -146,29 +153,84 @@ func (c *Client) Heartbeat(version string, uptime int64, activeAgents, eventsTod
 
 	data, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("marshal heartbeat: %w", err)
+		return nil, fmt.Errorf("marshal heartbeat: %w", err)
 	}
 
 	url := fmt.Sprintf("%s/v1/machines/%s/heartbeat", c.apiURL, c.cloudUUID)
 	req, err := http.NewRequest("POST", url, bytes.NewReader(data))
 	if err != nil {
-		return fmt.Errorf("create heartbeat request: %w", err)
+		return nil, fmt.Errorf("create heartbeat request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("heartbeat request failed: %w", err)
+		return nil, fmt.Errorf("heartbeat request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("heartbeat returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("heartbeat returned status %d", resp.StatusCode)
 	}
 
-	qlog.Debug("heartbeat sent: uptime=%ds, agents=%d, events=%d", uptime, activeAgents, eventsToday)
-	return nil
+	// Parse heartbeat response — may contain policy_hash for change detection
+	var result HeartbeatResult
+	if resp.StatusCode == http.StatusOK {
+		// Best-effort decode; if it fails, we still have a successful heartbeat
+		_ = json.NewDecoder(resp.Body).Decode(&result)
+	}
+
+	qlog.Debug("heartbeat sent: uptime=%ds, agents=%d, events=%d, policy_hash=%s", uptime, activeAgents, eventsToday, result.PolicyHash)
+	return &result, nil
+}
+
+// FetchPolicies fetches enforcement policies for this machine.
+// Supports ETag caching — pass the current hash as etag. Returns nil policies if 304.
+func (c *Client) FetchPolicies(etag string) ([]CloudPolicy, string, error) {
+	if c.cloudUUID == "" {
+		return nil, "", fmt.Errorf("not registered (no cloud UUID)")
+	}
+
+	url := fmt.Sprintf("%s/v1/machines/%s/policies", c.apiURL, c.cloudUUID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("create policies request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	if etag != "" {
+		req.Header.Set("If-None-Match", etag)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("policies request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 304 Not Modified — policies haven't changed
+	if resp.StatusCode == http.StatusNotModified {
+		return nil, etag, nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("policies fetch returned status %d", resp.StatusCode)
+	}
+
+	var policies []CloudPolicy
+	if err := json.NewDecoder(resp.Body).Decode(&policies); err != nil {
+		return nil, "", fmt.Errorf("decode policies response: %w", err)
+	}
+
+	// Extract ETag from response header
+	newETag := resp.Header.Get("ETag")
+	if newETag == "" {
+		// Fallback: use the policy_hash from heartbeat if no ETag header
+		newETag = etag
+	}
+
+	qlog.Info("fetched %d cloud policies (etag=%s)", len(policies), newETag)
+	return policies, newETag, nil
 }
 
 // PushEvents sends a batch of events to the cloud API.
