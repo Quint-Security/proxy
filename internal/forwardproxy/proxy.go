@@ -1246,7 +1246,7 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 						qlog.Error("llmparse panic for %s: %v", domain, r)
 					}
 				}()
-				if result := llmparse.Parse(domain, llmBodyBytes, req.Header.Get("User-Agent")); result != nil {
+				if result := llmparse.Parse(domain, req.URL.Path, llmBodyBytes, req.Header.Get("User-Agent")); result != nil {
 					for _, evt := range result.Events {
 						toolPlatform := ""
 						if identity != nil && agentdetect.IsSpecificPlatform(identity.Tool) {
@@ -1341,6 +1341,7 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 
 		// Multi-layer agent platform detection — upgrade tool classification
 		// using system prompt, headers, and process tree in addition to UA.
+		var detectedPlatform string
 		if identity != nil && req.Method == "POST" && bodyPreview != "" {
 			detection := p.agentDetector.DetectCached(agentID, agentdetect.DetectParams{
 				UserAgent:   req.Header.Get("User-Agent"),
@@ -1351,9 +1352,10 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 				PID:         processPID,
 			})
 			if detection.Platform != "" && detection.Platform != "unknown" {
+				detectedPlatform = detection.Platform
 				if !agentdetect.IsSpecificPlatform(identity.Tool) && agentdetect.IsSpecificPlatform(detection.Platform) {
 					identity.Tool = detection.Platform
-					_ = p.authDB.UpdateAgentProvider(identity.AgentID, identity.Provider, detection.Platform, domain)
+					_ = p.authDB.UpdateAgentTool(identity.AgentID, detection.Platform)
 					qlog.Info("agentdetect: identified %s as platform=%s (confidence=%.2f, sources=%v)",
 						agentName, detection.Platform, detection.Confidence, detection.Sources)
 				}

@@ -23,6 +23,16 @@ var knownAgentNames = map[string]string{
 	"cline":    "cline",
 	"devin":    "devin",
 	"kiro":     "kiro",
+	"codex":    "codex",
+	"goose":    "goose",
+	"gose":     "goose",
+	"augment":  "augment",
+	"opencode": "opencode",
+	"amp":      "amp",
+	"gemini":   "gemini-cli",
+	"void":     "void",
+	"trae":     "trae",
+	"pear":     "pearai",
 }
 
 func lookupPort(port int) *ProcessInfo {

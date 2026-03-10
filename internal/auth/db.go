@@ -460,6 +460,17 @@ func (d *DB) UpdateAgentProvider(agentID, provider, tool, host string) error {
 	return err
 }
 
+// UpdateAgentTool updates the detected platform/tool for an agent.
+// Unlike UpdateAgentProvider, this always updates regardless of current state.
+func (d *DB) UpdateAgentTool(agentID, tool string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := d.db.Exec(
+		"UPDATE agents SET tool = ?, updated_at = ? WHERE id = ?",
+		tool, now, agentID,
+	)
+	return err
+}
+
 // UpdateAgentModel updates the last observed model for an agent.
 func (d *DB) UpdateAgentModel(agentID, model string) error {
 	now := time.Now().UTC().Format(time.RFC3339)

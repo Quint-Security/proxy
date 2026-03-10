@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -19,6 +20,8 @@ import (
 	"github.com/Quint-Security/quint-proxy/internal/forwardproxy"
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
 	qlog "github.com/Quint-Security/quint-proxy/internal/log"
+	"github.com/Quint-Security/quint-proxy/internal/pac"
+	"github.com/Quint-Security/quint-proxy/internal/procscan"
 )
 
 // runDaemon handles: quint daemon [flags]
@@ -26,12 +29,13 @@ import (
 // heartbeat, and event forwarding (enterprise mode).
 func runDaemon(args []string) {
 	var (
-		tokenFlag  string
-		apiURLFlag string
-		configPath string
-		policyPath string
-		port       int
-		apiPort    int
+		tokenFlag    string
+		apiURLFlag   string
+		configPath   string
+		policyPath   string
+		port         int
+		apiPort      int
+		writePACOnly bool
 	)
 
 	// Parse flags (same manual iteration pattern as runWatch)
@@ -67,6 +71,8 @@ func runDaemon(args []string) {
 			if i < len(args) {
 				apiPort, _ = strconv.Atoi(args[i])
 			}
+		case "--write-pac":
+			writePACOnly = true
 		}
 	}
 
@@ -133,6 +139,37 @@ func runDaemon(args []string) {
 		apiPort = 8080
 	}
 
+	// --- PAC file generation ---
+	customDomains, _ := pac.LoadCustomDomains(dataDir)
+	allDomains := pac.MergeDomains(pac.DefaultDomains, customDomains)
+	pacPath := filepath.Join(dataDir, "proxy.pac")
+	if count, err := pac.WritePACFile(pacPath, port, allDomains); err != nil {
+		qlog.Warn("failed to write PAC file: %v", err)
+	} else {
+		qlog.Info("wrote PAC file: %s (%d domains)", pacPath, count)
+	}
+
+	if writePACOnly {
+		// Copy PAC to user home if running under sudo
+		if realUser := os.Getenv("SUDO_USER"); realUser != "" {
+			realHome := os.Getenv("HOME")
+			if realUser != "" {
+				realHome = "/Users/" + realUser // macOS default
+				if _, err := os.Stat(realHome); err != nil {
+					realHome = "/home/" + realUser // Linux fallback
+				}
+			}
+			userPACDir := filepath.Join(realHome, ".quint")
+			_ = os.MkdirAll(userPACDir, 0o755)
+			userPACPath := filepath.Join(userPACDir, "proxy.pac")
+			if data, err := os.ReadFile(pacPath); err == nil {
+				_ = os.WriteFile(userPACPath, data, 0o644)
+				qlog.Info("copied PAC file to %s", userPACPath)
+			}
+		}
+		return
+	}
+
 	qlog.Info("starting daemon mode (version=%s)", version)
 
 	// --- Cloud registration ---
@@ -165,14 +202,29 @@ func runDaemon(args []string) {
 				result, err := client.Heartbeat(version, uptime, 0, eventsBuffered)
 				if err != nil {
 					qlog.Warn("heartbeat failed: %v", err)
-				} else if result != nil && result.PolicyHash != "" && result.PolicyHash != enforcer.Hash() {
+				} else if result != nil {
 					// Policy version changed — fetch new policies
-					policies, newHash, fetchErr := client.FetchPolicies(enforcer.Hash())
-					if fetchErr != nil {
-						qlog.Warn("policy fetch failed: %v", fetchErr)
-					} else if policies != nil {
-						enforcer.Update(policies, newHash)
-						qlog.Info("updated cloud policies: %d policies, hash=%s", len(policies), newHash)
+					if result.PolicyHash != "" && result.PolicyHash != enforcer.Hash() {
+						policies, newHash, fetchErr := client.FetchPolicies(enforcer.Hash())
+						if fetchErr != nil {
+							qlog.Warn("policy fetch failed: %v", fetchErr)
+						} else if policies != nil {
+							enforcer.Update(policies, newHash)
+							qlog.Info("updated cloud policies: %d policies, hash=%s", len(policies), newHash)
+						}
+					}
+					// Domain list update — regenerate PAC file
+					if len(result.Domains) > 0 {
+						if err := pac.SaveCustomDomains(dataDir, result.Domains); err != nil {
+							qlog.Warn("failed to save custom domains: %v", err)
+						} else {
+							merged := pac.MergeDomains(pac.DefaultDomains, result.Domains)
+							if _, err := pac.WritePACFile(filepath.Join(dataDir, "proxy.pac"), port, merged); err != nil {
+								qlog.Warn("failed to update PAC file: %v", err)
+							} else {
+								qlog.Info("updated PAC file with %d domains from cloud", len(result.Domains))
+							}
+						}
 					}
 				}
 			case <-heartbeatStop:
@@ -250,6 +302,29 @@ func runDaemon(args []string) {
 			}
 		}
 	}()
+
+	// --- Process scanner ---
+	scanner := procscan.NewScanner(5*time.Second, func(agents []procscan.AgentProcess) {
+		entries := make([]cloud.AgentInventoryEntry, len(agents))
+		for i, a := range agents {
+			entries[i] = cloud.AgentInventoryEntry{
+				Platform:   a.Platform,
+				PID:        a.PID,
+				BinaryPath: a.BinaryPath,
+				State:      a.State,
+				CPUPercent: a.CPUPercent,
+				MemoryMB:   a.MemoryMB,
+			}
+			if !a.StartedAt.IsZero() {
+				entries[i].StartedAt = a.StartedAt.UTC().Format(time.RFC3339)
+			}
+		}
+		if err := client.ReportAgentInventory(entries); err != nil {
+			qlog.Warn("agent inventory report failed: %v", err)
+		}
+	})
+	scanCtx, scanCancel := context.WithCancel(context.Background())
+	go scanner.Start(scanCtx)
 
 	// --- Forward proxy ---
 	proxy, err := forwardproxy.New(forwardproxy.Options{
@@ -387,6 +462,8 @@ func runDaemon(args []string) {
 	var shutdownOnce sync.Once
 	shutdown := func() {
 		shutdownOnce.Do(func() {
+			scanCancel()
+			scanner.Stop()
 			close(heartbeatStop)
 			<-heartbeatDone
 			close(graphStop)
