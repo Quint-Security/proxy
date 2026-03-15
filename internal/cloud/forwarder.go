@@ -20,11 +20,12 @@ const (
 // It uses a ring buffer with a fixed capacity and drops the oldest
 // events when full.
 type Forwarder struct {
-	client *Client
-	mu     sync.Mutex
-	buffer []EventPayload
-	stopCh chan struct{}
-	done   chan struct{}
+	client   *Client
+	mu       sync.Mutex
+	buffer   []EventPayload
+	stopCh   chan struct{}
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 // NewForwarder creates a new event forwarder backed by the given cloud client.
@@ -71,11 +72,13 @@ func (f *Forwarder) Start() {
 }
 
 // Stop signals the forwarder to perform a final flush and shut down.
-// Blocks until the background goroutine exits.
+// Blocks until the background goroutine exits. Safe to call multiple times.
 func (f *Forwarder) Stop() {
-	close(f.stopCh)
-	<-f.done
-	qlog.Info("event forwarder stopped")
+	f.stopOnce.Do(func() {
+		close(f.stopCh)
+		<-f.done
+		qlog.Info("event forwarder stopped")
+	})
 }
 
 // BufferLen returns the current number of buffered events.

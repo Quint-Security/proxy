@@ -877,6 +877,11 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("proxy error: %v", err), http.StatusBadGateway)
 		return
 	}
+	if resp == nil {
+		qlog.Error("nil response for %s %s", r.Method, r.URL)
+		http.Error(w, "proxy error: nil response", http.StatusBadGateway)
+		return
+	}
 	defer resp.Body.Close()
 
 	// Read response body preview
@@ -939,6 +944,13 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 // handleConnect implements MITM TLS interception for HTTPS.
 func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
+	// Recover from panics to prevent crashing the entire proxy.
+	defer func() {
+		if rv := recover(); rv != nil {
+			qlog.Error("panic in handleConnect for %s: %v", r.Host, rv)
+		}
+	}()
+
 	// Extract the source IP for tunnel tracking.
 	ip := r.RemoteAddr
 	if idx := strings.LastIndex(ip, ":"); idx != -1 {
