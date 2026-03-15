@@ -9,15 +9,23 @@ import (
 	"github.com/Quint-Security/quint-proxy/internal/intercept"
 )
 
-// runEnv handles: quint env [--port PORT] [--agent NAME]
-// Prints export statements for proxy env vars.
-// Usage: eval $(quint env)
+// runEnv handles: quint env [--proxy] [--port PORT] [--agent NAME]
+// Prints export statements for CA trust env vars.
+// With --proxy, also prints HTTP_PROXY/HTTPS_PROXY for routing CLI traffic.
+//
+// Usage:
+//
+//	eval $(quint env)          # CA trust only (safe for all shells)
+//	eval $(quint env --proxy)  # CA trust + proxy routing for AI agent terminals
 func runEnv(args []string) {
 	port := 9090
 	agent := ""
+	includeProxy := false
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--proxy":
+			includeProxy = true
 		case "--port":
 			i++
 			if i < len(args) {
@@ -50,13 +58,7 @@ func runEnv(args []string) {
 		os.Exit(1)
 	}
 
-	// Build proxy URL with optional agent name
-	proxyURL := fmt.Sprintf("http://localhost:%d", port)
-	if agent != "" {
-		proxyURL = fmt.Sprintf("http://%s@localhost:%d", agent, port)
-	}
-
-	// Ensure bundle path is absolute
+	// Ensure paths are absolute
 	if !filepath.IsAbs(bundlePath) {
 		abs, err := filepath.Abs(bundlePath)
 		if err == nil {
@@ -70,8 +72,19 @@ func runEnv(args []string) {
 		}
 	}
 
-	fmt.Printf("export SSL_CERT_FILE=%s\n", bundlePath)
-	fmt.Printf("export NODE_EXTRA_CA_CERTS=%s\n", certPath)
-	fmt.Printf("export HTTP_PROXY=%s\n", proxyURL)
-	fmt.Printf("export HTTPS_PROXY=%s\n", proxyURL)
+	if includeProxy {
+		// Blanket proxy mode — route everything through the proxy
+		proxyURL := fmt.Sprintf("http://localhost:%d", port)
+		if agent != "" {
+			proxyURL = fmt.Sprintf("http://%s@localhost:%d", agent, port)
+		}
+		fmt.Printf("export SSL_CERT_FILE=%s\n", bundlePath)
+		fmt.Printf("export NODE_EXTRA_CA_CERTS=%s\n", certPath)
+		fmt.Printf("export HTTP_PROXY=%s\n", proxyURL)
+		fmt.Printf("export HTTPS_PROXY=%s\n", proxyURL)
+	} else {
+		// Default: CA trust + agent wrappers (same as env.sh)
+		agents := detectAgents()
+		fmt.Print(generateEnvSh(bundlePath, certPath, port, agents))
+	}
 }

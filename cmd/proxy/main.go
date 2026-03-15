@@ -48,12 +48,15 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "Commands:\n")
 	fmt.Fprintf(os.Stderr, "  daemon      Run as system daemon (production mode)\n")
 	fmt.Fprintf(os.Stderr, "  watch       Run in foreground (development mode)\n")
-	fmt.Fprintf(os.Stderr, "  setup       Install and configure Quint on this machine\n")
+	fmt.Fprintf(os.Stderr, "  setup       Install and configure Quint (--env-only to refresh agents)\n")
 	fmt.Fprintf(os.Stderr, "  uninstall   Remove Quint from this machine\n")
 	fmt.Fprintf(os.Stderr, "  status      Show agent status\n")
-	fmt.Fprintf(os.Stderr, "  env         Print environment variables\n")
+	fmt.Fprintf(os.Stderr, "  env         Print env vars (--proxy for blanket HTTP_PROXY)\n")
 	fmt.Fprintf(os.Stderr, "  version     Print version\n\n")
-	fmt.Fprintf(os.Stderr, "Run 'quint <command> --help' for details.\n")
+	fmt.Fprintf(os.Stderr, "Traffic routing:\n")
+	fmt.Fprintf(os.Stderr, "  GUI apps (Cursor, VS Code)  → macOS system proxy (PAC file)\n")
+	fmt.Fprintf(os.Stderr, "  CLI agents (claude, codex)  → Shell wrappers (auto-generated)\n")
+	fmt.Fprintf(os.Stderr, "  Everything else              → Direct (no proxy)\n\n")
 }
 
 // httpGetQuick does a quick HTTP GET with a 2-second timeout.
