@@ -43,8 +43,13 @@ func runEnv(args []string) {
 	policy, _ := intercept.LoadPolicy("")
 	dataDir := intercept.ResolveDataDir(policy.DataDir)
 
-	// Check if daemon data dir exists (installed via install script)
-	if _, err := os.Stat("/var/lib/quint/ca"); err == nil {
+	// Prefer user-readable ~/.quint/ca/ over root-owned /var/lib/quint/ca/.
+	// The daemon copies certs to ~/.quint/ca/ during setup for user-space access.
+	home, _ := os.UserHomeDir()
+	userCADir := filepath.Join(home, ".quint", "ca")
+	if _, err := os.Stat(filepath.Join(userCADir, "quint-ca.crt")); err == nil {
+		dataDir = filepath.Join(home, ".quint")
+	} else if _, err := os.Stat("/var/lib/quint/ca"); err == nil {
 		dataDir = "/var/lib/quint"
 	}
 
