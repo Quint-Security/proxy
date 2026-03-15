@@ -1240,17 +1240,22 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 		var llmBodyBytes []byte
 		if req.Body != nil {
 			if isLLM {
-				// Buffer full body for LLM parsing — cap at 10MB to avoid OOM
-				const maxLLMBody = 10 * 1024 * 1024
+				// Buffer full body for LLM parsing — cap at 20MB to avoid OOM.
+				// Must read the ENTIRE body so ContentLength matches when forwarding.
+				const maxLLMBody = 20 * 1024 * 1024
 				llmBodyBytes, _ = io.ReadAll(io.LimitReader(req.Body, maxLLMBody))
+				// Drain any remaining body beyond the cap so the connection stays clean
+				io.Copy(io.Discard, req.Body)
 				// Use the buffered body as the preview too (capped)
 				if len(llmBodyBytes) > maxBody {
 					bodyPreview = string(llmBodyBytes[:maxBody]) + "..."
 				} else {
 					bodyPreview = string(llmBodyBytes)
 				}
-				// Reconstruct body from buffer for forwarding
+				// Reconstruct body from buffer for forwarding.
+				// Update ContentLength to match actual buffered size to prevent mismatch.
 				req.Body = io.NopCloser(bytes.NewReader(llmBodyBytes))
+				req.ContentLength = int64(len(llmBodyBytes))
 			} else {
 				previewBuf, _ := io.ReadAll(io.LimitReader(req.Body, int64(maxBody+1)))
 				if len(previewBuf) > maxBody {
