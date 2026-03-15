@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -947,7 +948,13 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Recover from panics to prevent crashing the entire proxy.
 	defer func() {
 		if rv := recover(); rv != nil {
-			qlog.Error("panic in handleConnect for %s: %v", r.Host, rv)
+			qlog.Error("panic in handleConnect for %s: %v\n%s", r.Host, rv, debug.Stack())
+			if hijacker, ok := w.(http.Hijacker); ok {
+				if conn, _, err := hijacker.Hijack(); err == nil {
+					conn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+					conn.Close()
+				}
+			}
 		}
 	}()
 
@@ -1345,7 +1352,7 @@ func (p *Proxy) serveMITM(clientConn, serverConn net.Conn, identity *auth.Identi
 							qlog.Info("tunnel: model split in %s — %s → child %s (parent_model=%s, child_model=%s)",
 								trackerKey, result.ParentIdentity.AgentName, agentName, result.ParentModel, model)
 						}
-					} else if model != identity.Model {
+					} else if identity != nil && model != identity.Model {
 						// No split — just update the model on the current identity
 						identity.Model = model
 						_ = p.authDB.UpdateAgentModel(identity.AgentID, model)

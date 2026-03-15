@@ -17,6 +17,7 @@ API_URL=""
 PORT=""
 API_PORT=""
 NO_DAEMON=""
+DRY_RUN=""
 
 # ---------------------------------------------------------------------------
 # Parse arguments (pass-through to quint setup)
@@ -49,6 +50,10 @@ while [ $# -gt 0 ]; do
       SETUP_ARGS="$SETUP_ARGS --no-daemon"
       shift
       ;;
+    --dry-run)
+      DRY_RUN="1"
+      shift
+      ;;
     *)
       echo "Unknown option: $1"
       shift
@@ -79,6 +84,42 @@ case "$ARCH" in
     ;;
 esac
 
+# ---------------------------------------------------------------------------
+# Pre-flight checks
+# ---------------------------------------------------------------------------
+for cmd in curl chmod; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "  Error: required command '$cmd' not found"
+    exit 1
+  fi
+done
+
+if [ "$OS" = "darwin" ]; then
+  MACOS_VERSION="$(sw_vers -productVersion 2>/dev/null || echo "unknown")"
+  MACOS_MAJOR="$(echo "$MACOS_VERSION" | cut -d. -f1)"
+  if [ "$MACOS_MAJOR" != "unknown" ] && [ "$MACOS_MAJOR" -lt 13 ]; then
+    echo "  Warning: macOS $MACOS_VERSION detected. Quint requires macOS 13+ for full functionality."
+  fi
+fi
+
+# Stop existing daemon before upgrade
+if [ -f /Library/LaunchDaemons/dev.quintai.agent.plist ]; then
+  echo "  Stopping existing Quint daemon..."
+  launchctl unload /Library/LaunchDaemons/dev.quintai.agent.plist 2>/dev/null || true
+fi
+
+# Check for stale binary
+if [ -f /usr/local/bin/quint ]; then
+  OLD_VERSION="$(/usr/local/bin/quint version 2>/dev/null || echo "unknown")"
+  echo "  Existing install detected: $OLD_VERSION (upgrading)"
+fi
+
+# Check for Homebrew shadow
+if [ -f /opt/homebrew/bin/quint ]; then
+  echo "  Warning: /opt/homebrew/bin/quint may shadow /usr/local/bin/quint"
+  echo "  Consider: brew uninstall quint"
+fi
+
 echo ""
 echo "  Installing Quint (${OS}/${ARCH})"
 echo ""
@@ -103,6 +144,14 @@ echo "  Version: v${VERSION}"
 DOWNLOAD_URL="https://github.com/Quint-Security/quint-proxy/releases/download/v${VERSION}/quint-proxy-${OS}-${ARCH}"
 INSTALL_PATH="/usr/local/bin/quint"
 
+if [ "$DRY_RUN" = "1" ]; then
+  echo ""
+  echo "  [dry-run] Would download: $DOWNLOAD_URL"
+  echo "  [dry-run] Would install to: $INSTALL_PATH"
+  echo "  [dry-run] Would run: quint setup $SETUP_ARGS"
+  exit 0
+fi
+
 echo "  Downloading ${DOWNLOAD_URL} ..."
 if ! curl -fsSL -o "$INSTALL_PATH" "$DOWNLOAD_URL"; then
   echo ""
@@ -124,4 +173,24 @@ echo "  [ok] Binary verified: $($INSTALL_PATH version)"
 # Run setup (does everything: CA, keychain, env.sh, shell profile, daemon)
 # ---------------------------------------------------------------------------
 echo ""
-exec "$INSTALL_PATH" setup $SETUP_ARGS
+"$INSTALL_PATH" setup $SETUP_ARGS
+SETUP_EXIT=$?
+
+if [ $SETUP_EXIT -ne 0 ]; then
+  echo ""
+  echo "  Error: setup failed (exit $SETUP_EXIT)"
+  echo "  Try: sudo quint setup $SETUP_ARGS"
+  exit $SETUP_EXIT
+fi
+
+# Verify daemon is running
+sleep 2
+if curl -sf http://localhost:9090/health >/dev/null 2>&1; then
+  echo "  [ok] Quint daemon is running"
+else
+  echo "  Warning: daemon health check failed (may still be starting)"
+  echo "  Check: sudo launchctl list | grep quintai"
+fi
+
+echo ""
+echo "  Quint installed successfully!"
