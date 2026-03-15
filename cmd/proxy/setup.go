@@ -639,9 +639,35 @@ func installEnvAgent(realHome, certPath, bundlePath string, port int, realUser s
 	step("Installed LaunchAgent for GUI app env vars (%s)", plistPath)
 }
 
-// setSystemProxy configures macOS auto-proxy (PAC) on all active network
-// interfaces. This routes traffic through Quint at the OS level, catching
-// apps that ignore HTTP_PROXY env vars.
+// proxyableInterfaces are the only network interface types that should get
+// the PAC proxy. VPN tunnels (Tailscale, WireGuard), virtual interfaces,
+// and peripheral interfaces must NEVER get proxy settings — they break
+// connectivity for anything routed through them.
+var proxySkipInterfaces = []string{
+	"Tailscale",
+	"utun",           // WireGuard/VPN tunnels
+	"Thunderbolt",
+	"iPhone USB",
+	"Bluetooth",
+	"FireWire",
+	"AX88179A",       // USB ethernet adapters
+	"lo0",
+}
+
+// shouldSkipInterface returns true for interfaces that must not get proxy settings.
+func shouldSkipInterface(iface string) bool {
+	lower := strings.ToLower(iface)
+	for _, skip := range proxySkipInterfaces {
+		if strings.Contains(lower, strings.ToLower(skip)) {
+			return true
+		}
+	}
+	return false
+}
+
+// setSystemProxy configures macOS auto-proxy (PAC) on web-browsing network
+// interfaces only (Wi-Fi, Ethernet). VPN tunnels, Bluetooth, and other
+// non-browsing interfaces are explicitly skipped to avoid breaking connectivity.
 func setSystemProxy(pacPath string) {
 	pacURL := "file://" + pacPath
 
@@ -651,7 +677,7 @@ func setSystemProxy(pacPath string) {
 		return
 	}
 
-	allOk := true
+	var configured []string
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	for _, line := range lines {
 		iface := strings.TrimSpace(line)
@@ -660,22 +686,26 @@ func setSystemProxy(pacPath string) {
 			continue
 		}
 
+		// Skip VPN tunnels, virtual interfaces, and peripherals
+		if shouldSkipInterface(iface) {
+			continue
+		}
+
 		// Set PAC URL
 		if out, err := exec.Command("networksetup", "-setautoproxyurl", iface, pacURL).CombinedOutput(); err != nil {
-			// Some interfaces (like iPhone USB) don't support proxy — skip silently
 			_ = out
-			allOk = false
 			continue
 		}
 
 		// Enable auto-proxy
 		exec.Command("networksetup", "-setautoproxystate", iface, "on").Run()
+		configured = append(configured, iface)
 	}
 
-	if allOk {
-		step("Set system proxy (PAC) on all network interfaces")
+	if len(configured) > 0 {
+		step("Set system proxy (PAC) on: %s", strings.Join(configured, ", "))
 	} else {
-		step("Set system proxy (PAC) on primary network interfaces")
+		warn("no suitable network interfaces found for PAC proxy")
 	}
 }
 

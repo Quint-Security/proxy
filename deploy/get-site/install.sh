@@ -266,10 +266,15 @@ case "$OS" in
   darwin)
     if [ -f "$PAC_PATH" ]; then
       PAC_URL="file://${PAC_PATH}"
+      # Only set PAC on web-browsing interfaces (Wi-Fi, Ethernet).
+      # Skip VPN tunnels (Tailscale), Bluetooth, iPhone USB, etc.
       for iface in $(networksetup -listallnetworkservices | tail -n +2); do
+        case "$iface" in
+          *Tailscale*|*utun*|*Bluetooth*|*iPhone*|*FireWire*|*Thunderbolt*) continue ;;
+        esac
         networksetup -setautoproxyurl "$iface" "$PAC_URL" 2>/dev/null || true
       done
-      echo "  Set system auto-proxy (PAC) for all network interfaces"
+      echo "  Set system auto-proxy (PAC) for browsing interfaces"
     fi
     ;;
   linux)
