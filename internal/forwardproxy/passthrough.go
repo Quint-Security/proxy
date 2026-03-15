@@ -114,4 +114,5 @@ func (p *Proxy) blindTunnel(w http.ResponseWriter, r *http.Request, host string)
 	go func() { io.Copy(upstream, clientConn); done <- struct{}{} }()
 	go func() { io.Copy(clientConn, upstream); done <- struct{}{} }()
 	<-done
+	<-done
 }

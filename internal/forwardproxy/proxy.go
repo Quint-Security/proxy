@@ -511,9 +511,15 @@ func New(opts Options) (*Proxy, error) {
 		return nil, fmt.Errorf("open audit db: %w", err)
 	}
 
-	policyBytes, _ := json.Marshal(opts.Policy)
 	var policyMap map[string]any
-	json.Unmarshal(policyBytes, &policyMap)
+	policyBytes, err := json.Marshal(opts.Policy)
+	if err != nil {
+		qlog.Error("marshal policy for audit logger: %v", err)
+		policyMap = make(map[string]any)
+	} else if err := json.Unmarshal(policyBytes, &policyMap); err != nil {
+		qlog.Error("unmarshal policy for audit logger: %v", err)
+		policyMap = make(map[string]any)
+	}
 	logger := audit.NewLogger(auditDB, kp.PrivateKey, kp.PublicKey, policyMap)
 
 	// Auth DB for agent identity resolution

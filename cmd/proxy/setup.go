@@ -218,7 +218,7 @@ fi
 		step("Wrote /etc/quint/config.yaml")
 
 		// Install and start system service
-		if err := installDaemon(tokenFlag, port, apiPort); err != nil {
+		if err := installDaemon(port, apiPort); err != nil {
 			fatal("install daemon: %v", err)
 		}
 		step("Installed and started daemon")
@@ -321,7 +321,7 @@ func trustCA(certPath string) error {
 }
 
 // installDaemon installs and starts the system daemon.
-func installDaemon(token string, port, apiPort int) error {
+func installDaemon(port, apiPort int) error {
 	binaryPath := "/usr/local/bin/quint"
 
 	switch runtime.GOOS {
@@ -336,8 +336,6 @@ func installDaemon(token string, port, apiPort int) error {
   <array>
     <string>%s</string>
     <string>daemon</string>
-    <string>--token</string>
-    <string>%s</string>
     <string>--port</string>
     <string>%d</string>
     <string>--api-port</string>
@@ -349,7 +347,7 @@ func installDaemon(token string, port, apiPort int) error {
   <key>StandardErrorPath</key><string>/var/log/quint/agent.err</string>
 </dict>
 </plist>
-`, binaryPath, token, port, apiPort)
+`, binaryPath, port, apiPort)
 
 		_ = os.MkdirAll("/var/log/quint", 0o755)
 
@@ -375,7 +373,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%s daemon --token %s --port %d --api-port %d
+ExecStart=%s daemon --port %d --api-port %d
 Restart=always
 RestartSec=5
 User=root
@@ -384,7 +382,7 @@ StandardError=append:/var/log/quint/agent.err
 
 [Install]
 WantedBy=multi-user.target
-`, binaryPath, token, port, apiPort)
+`, binaryPath, port, apiPort)
 
 		_ = os.MkdirAll("/var/log/quint", 0o755)
 
