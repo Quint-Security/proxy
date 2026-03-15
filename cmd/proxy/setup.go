@@ -572,14 +572,16 @@ export HTTPS_PROXY=http://localhost:%d
 	}
 }
 
-// installEnvAgent creates a user LaunchAgent that injects proxy env vars into
-// the GUI session at login. This is the only reliable way to get GUI-launched
-// apps (Cursor, VS Code, Claude Desktop) to inherit NODE_EXTRA_CA_CERTS and
-// HTTP_PROXY on modern macOS where SIP blocks `sudo launchctl setenv`.
+// installEnvAgent creates a user LaunchAgent that injects CA trust env vars
+// into the GUI session at login. This is the only reliable way to get
+// GUI-launched apps (Cursor, VS Code, Claude Desktop) to inherit
+// NODE_EXTRA_CA_CERTS on modern macOS where SIP blocks `sudo launchctl setenv`.
 //
-// The LaunchAgent runs `launchctl setenv` in the USER's session context (not
-// root), which is permitted by SIP. It runs once at login and whenever the
-// system wakes from sleep.
+// IMPORTANT: We do NOT set HTTP_PROXY/HTTPS_PROXY here. GUI app proxy routing
+// is handled by the PAC file (which only routes tool API domains). AI provider
+// domains go direct. CLI agents use per-agent wrappers in env.sh that health-
+// check the proxy before routing. This prevents the proxy from breaking
+// connectivity if it's down or overloaded.
 func installEnvAgent(realHome, certPath, bundlePath string, port int, realUser string) {
 	agentDir := filepath.Join(realHome, "Library", "LaunchAgents")
 	if err := os.MkdirAll(agentDir, 0o755); err != nil {
@@ -587,16 +589,13 @@ func installEnvAgent(realHome, certPath, bundlePath string, port int, realUser s
 		return
 	}
 
-	// Build the shell commands that set env vars in the user's GUI session.
-	// Each `launchctl setenv` call makes the var available to subsequently
-	// launched GUI apps (Finder, Spotlight, Dock launches).
+	// Only set CA trust vars — NO proxy vars. Proxy routing is handled by
+	// the PAC file (GUI apps) and env.sh wrappers (CLI agents).
 	script := fmt.Sprintf(
 		"launchctl setenv NODE_EXTRA_CA_CERTS %s; "+
 			"launchctl setenv SSL_CERT_FILE %s; "+
-			"launchctl setenv HTTP_PROXY http://localhost:%d; "+
-			"launchctl setenv HTTPS_PROXY http://localhost:%d; "+
 			"launchctl setenv NODE_USE_SYSTEM_CA 1",
-		certPath, bundlePath, port, port,
+		certPath, bundlePath,
 	)
 
 	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
