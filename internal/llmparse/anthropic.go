@@ -88,8 +88,9 @@ func ParseAnthropicRequest(body []byte, userAgent string) (*ParseResult, error) 
 
 	if len(toolUses) == 0 {
 		return &ParseResult{
-			Model: model,
-			Agent: userAgent,
+			Model:    model,
+			Agent:    userAgent,
+			Provider: "anthropic",
 		}, nil
 	}
 
@@ -113,9 +114,10 @@ func ParseAnthropicRequest(body []byte, userAgent string) (*ParseResult, error) 
 	}
 
 	return &ParseResult{
-		Events: []AgentEvent{event},
-		Model:  model,
-		Agent:  userAgent,
+		Events:   []AgentEvent{event},
+		Model:    model,
+		Agent:    userAgent,
+		Provider: "anthropic",
 	}, nil
 }
 

@@ -18,7 +18,8 @@ type AgentEvent struct {
 
 // ParseResult contains all events extracted from a single API request/response pair.
 type ParseResult struct {
-	Events []AgentEvent
-	Model  string
-	Agent  string // best-guess agent identity from User-Agent
+	Events   []AgentEvent
+	Model    string
+	Agent    string // best-guess agent identity from User-Agent
+	Provider string // "anthropic", "openai", "openai-responses", "google-gemini", "aws-bedrock-converse", "azure-openai", "generic"
 }

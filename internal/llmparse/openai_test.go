@@ -206,7 +206,7 @@ func TestParse_OpenAIRouter(t *testing.T) {
 		]
 	}`)
 
-	result := Parse("api.openai.com", body, "agent")
+	result := Parse("api.openai.com", "", body, "agent")
 	if result == nil || len(result.Events) == 0 {
 		t.Fatal("expected events for openai.com")
 	}

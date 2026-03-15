@@ -80,6 +80,9 @@ func isLLMProviderDomain(domain string) bool {
 	if strings.HasPrefix(domain, "bedrock-runtime.") && strings.HasSuffix(domain, ".amazonaws.com") {
 		return true
 	}
+	if strings.HasSuffix(domain, ".openai.azure.com") {
+		return true
+	}
 	return false
 }
 

@@ -251,6 +251,45 @@ for profile in "${REAL_HOME}/.zshrc" "${REAL_HOME}/.bashrc"; do
 done
 
 # ---------------------------------------------------------------------------
+# System proxy via PAC (zero-config interception)
+# ---------------------------------------------------------------------------
+PAC_PATH="${REAL_HOME}/.quint/proxy.pac"
+
+quint daemon --write-pac 2>/dev/null || true
+
+if [ -f "/var/lib/quint/proxy.pac" ]; then
+  cp "/var/lib/quint/proxy.pac" "$PAC_PATH" 2>/dev/null || true
+  chown "${REAL_USER}" "$PAC_PATH" 2>/dev/null || true
+fi
+
+case "$OS" in
+  darwin)
+    if [ -f "$PAC_PATH" ]; then
+      PAC_URL="file://${PAC_PATH}"
+      for iface in $(networksetup -listallnetworkservices | tail -n +2); do
+        networksetup -setautoproxyurl "$iface" "$PAC_URL" 2>/dev/null || true
+      done
+      echo "  Set system auto-proxy (PAC) for all network interfaces"
+    fi
+    ;;
+  linux)
+    cat > /etc/profile.d/quint-proxy.sh <<'PROXYEOF'
+export HTTP_PROXY=http://127.0.0.1:9090
+export HTTPS_PROXY=http://127.0.0.1:9090
+export http_proxy=http://127.0.0.1:9090
+export https_proxy=http://127.0.0.1:9090
+export no_proxy=localhost,127.0.0.1,*.local
+export NO_PROXY=localhost,127.0.0.1,*.local
+PROXYEOF
+    chmod 644 /etc/profile.d/quint-proxy.sh
+    if ! grep -qF "HTTP_PROXY" /etc/environment 2>/dev/null; then
+      printf 'HTTP_PROXY="http://127.0.0.1:9090"\nHTTPS_PROXY="http://127.0.0.1:9090"\n' >> /etc/environment
+    fi
+    echo "  Set system-wide proxy environment"
+    ;;
+esac
+
+# ---------------------------------------------------------------------------
 # Verify
 # ---------------------------------------------------------------------------
 sleep 2

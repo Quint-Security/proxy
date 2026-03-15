@@ -331,13 +331,13 @@ func TestParse_Router(t *testing.T) {
 	}{
 		{"api.anthropic.com", false, "Glob"},
 		{"bedrock-runtime.us-east-1.amazonaws.com", false, "Glob"},
-		{"unknown.example.com", true, ""},
-		{"", true, ""},
+		{"unknown.example.com", false, "Glob"}, // generic fallback finds tool_use
+		{"", false, "Glob"},                     // generic fallback finds tool_use
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.host, func(t *testing.T) {
-			result := Parse(tt.host, body, "agent")
+			result := Parse(tt.host, "", body, "agent")
 			if tt.wantNil {
 				if result != nil && len(result.Events) > 0 {
 					t.Errorf("expected nil/empty result for host %s", tt.host)
@@ -355,12 +355,12 @@ func TestParse_Router(t *testing.T) {
 }
 
 func TestParse_EmptyBody(t *testing.T) {
-	result := Parse("api.anthropic.com", nil, "agent")
+	result := Parse("api.anthropic.com", "", nil, "agent")
 	if result != nil {
 		t.Error("expected nil result for empty body")
 	}
 
-	result = Parse("api.anthropic.com", []byte{}, "agent")
+	result = Parse("api.anthropic.com", "", []byte{}, "agent")
 	if result != nil {
 		t.Error("expected nil result for empty body")
 	}

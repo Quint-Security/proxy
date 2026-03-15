@@ -133,8 +133,9 @@ func (c *Client) Register(version string) error {
 
 // HeartbeatResult holds the parsed heartbeat response.
 type HeartbeatResult struct {
-	ConfigVersion string `json:"config_version"`
-	PolicyHash    string `json:"policy_hash"`
+	ConfigVersion string   `json:"config_version"`
+	PolicyHash    string   `json:"policy_hash"`
+	Domains       []string `json:"domains,omitempty"`
 }
 
 // Heartbeat sends a heartbeat to the cloud API and returns the response
@@ -323,6 +324,55 @@ func (c *Client) PushGraphs(graphs []GraphPayload) error {
 		lastErr = fmt.Errorf("graphs push returned status %d", resp.StatusCode)
 	}
 	return lastErr
+}
+
+// AgentInventoryEntry represents a detected AI agent process.
+type AgentInventoryEntry struct {
+	Platform   string  `json:"platform"`
+	PID        int     `json:"pid"`
+	BinaryPath string  `json:"binary_path,omitempty"`
+	State      string  `json:"state"`
+	CPUPercent float64 `json:"cpu_percent,omitempty"`
+	MemoryMB   int     `json:"memory_mb,omitempty"`
+	StartedAt  string  `json:"started_at,omitempty"`
+}
+
+type agentInventoryRequest struct {
+	Agents []AgentInventoryEntry `json:"agents"`
+}
+
+// ReportAgentInventory sends the current agent process inventory to the cloud.
+func (c *Client) ReportAgentInventory(agents []AgentInventoryEntry) error {
+	if c.cloudUUID == "" {
+		return nil
+	}
+
+	body := agentInventoryRequest{Agents: agents}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal agent inventory: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/v1/machines/%s/agents", c.apiURL, c.cloudUUID)
+	req, err := http.NewRequest("POST", url, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("create agent inventory request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("agent inventory request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("agent inventory report returned status %d", resp.StatusCode)
+	}
+
+	qlog.Debug("reported %d agent processes to cloud", len(agents))
+	return nil
 }
 
 // generateMachineID produces a deterministic machine identifier from
