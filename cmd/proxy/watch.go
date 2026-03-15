@@ -118,6 +118,7 @@ func runWatch(args []string) {
 	var heartbeatDone chan struct{}
 	var graphStop chan struct{}
 	var graphDone chan struct{}
+	var apiSrv *dashboard.Server
 
 	// Always create the enforcer — loads cached policies from disk so
 	// enforcement works even without cloud connectivity.
@@ -149,6 +150,9 @@ func runWatch(args []string) {
 						if hbErr != nil {
 							qlog.Warn("heartbeat failed: %v", hbErr)
 						} else if result != nil {
+							if apiSrv != nil {
+								apiSrv.RecordHeartbeat()
+							}
 							// Policy version changed — fetch new policies
 							if result.PolicyHash != "" && result.PolicyHash != enforcer.Hash() {
 								policies, newHash, fetchErr := client.FetchPolicies(enforcer.Hash())
@@ -400,14 +404,19 @@ func runWatch(args []string) {
 	fmt.Println()
 
 	// Start API server (non-blocking)
-	var apiSrv *dashboard.Server
 	apiSrv, err = dashboard.NewWithOpts(dashboard.Opts{
-		DataDir: dataDir,
-		Policy:  policy,
+		DataDir:    dataDir,
+		Policy:     policy,
+		Version:    version,
+		ProxyPort:  port,
+		CACertPath: qcrypto.CertPath(dataDir),
 	})
 	if err != nil {
 		qlog.Error("API server failed to start: %v", err)
 	} else {
+		if forwarder != nil {
+			apiSrv.SetCloudStatus(true)
+		}
 		if err := apiSrv.StartAsync(apiPort); err != nil {
 			qlog.Error("API server listen error: %v", err)
 			apiSrv = nil

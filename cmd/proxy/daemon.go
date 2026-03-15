@@ -124,6 +124,15 @@ func runDaemon(args []string) {
 	}
 	qlog.SetLevel(logLevel)
 
+	// Set up log rotation — default to /var/log/quint/quint.log for daemon mode.
+	// Override with QUINT_LOG_FILE env var.
+	logFile := os.Getenv("QUINT_LOG_FILE")
+	if logFile == "" {
+		logFile = "/var/log/quint/quint.log"
+	}
+	_ = os.MkdirAll(filepath.Dir(logFile), 0o755)
+	qlog.SetupFileLogging(logFile)
+
 	dataDir := intercept.ResolveDataDir(policy.DataDir)
 
 	// Daemon mode: if dataDir is still relative (e.g. LaunchDaemon running as root
@@ -186,6 +195,9 @@ func runDaemon(args []string) {
 	forwarder := cloud.NewForwarder(client)
 	forwarder.Start()
 
+	// Declare apiSrv early so the heartbeat goroutine can record heartbeats.
+	var apiSrv *dashboard.Server
+
 	// --- Heartbeat goroutine (with policy sync) ---
 	startTime := time.Now()
 	heartbeatStop := make(chan struct{})
@@ -203,6 +215,9 @@ func runDaemon(args []string) {
 				if err != nil {
 					qlog.Warn("heartbeat failed: %v", err)
 				} else if result != nil {
+					if apiSrv != nil {
+						apiSrv.RecordHeartbeat()
+					}
 					// Policy version changed — fetch new policies
 					if result.PolicyHash != "" && result.PolicyHash != enforcer.Hash() {
 						policies, newHash, fetchErr := client.FetchPolicies(enforcer.Hash())
@@ -439,14 +454,17 @@ func runDaemon(args []string) {
 	fmt.Println()
 
 	// --- API server ---
-	var apiSrv *dashboard.Server
 	apiSrv, err = dashboard.NewWithOpts(dashboard.Opts{
-		DataDir: dataDir,
-		Policy:  policy,
+		DataDir:    dataDir,
+		Policy:     policy,
+		Version:    version,
+		ProxyPort:  port,
+		CACertPath: qcrypto.CertPath(dataDir),
 	})
 	if err != nil {
 		qlog.Error("API server failed to start: %v", err)
 	} else {
+		apiSrv.SetCloudStatus(true) // daemon mode always has cloud
 		if err := apiSrv.StartAsync(apiPort); err != nil {
 			qlog.Error("API server listen error: %v", err)
 			apiSrv = nil

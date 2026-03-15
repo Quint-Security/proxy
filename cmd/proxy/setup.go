@@ -68,17 +68,30 @@ func runSetup(args []string) {
 		apiURLFlag = "https://api.quintai.dev"
 	}
 
+	// --env-only: just regenerate ~/.quint/env.sh (and env.fish) with agent wrappers.
+	// Does NOT require root since it only writes to user-space files.
+	if envOnly {
+		realHome := os.Getenv("HOME")
+		if realHome == "" {
+			// Fallback: try to detect from SUDO_USER if running as root
+			if os.Geteuid() == 0 {
+				_, realHome = detectRealUser()
+			} else {
+				home, err := os.UserHomeDir()
+				if err != nil {
+					fatal("cannot determine home directory: %v", err)
+				}
+				realHome = home
+			}
+		}
+		runEnvOnly(realHome, port)
+		return
+	}
+
 	isRoot := os.Geteuid() == 0
 	if !isRoot {
 		fmt.Fprintf(os.Stderr, "quint setup: must be run as root (sudo quint setup ...)\n")
 		os.Exit(1)
-	}
-
-	// --env-only: just regenerate ~/.quint/env.sh with agent wrappers
-	if envOnly {
-		_, realHome := detectRealUser()
-		runEnvOnly(realHome, port)
-		return
 	}
 
 	// Detect real user's home directory
@@ -187,6 +200,17 @@ func runSetup(args []string) {
 		step("Wrote %s (no agent CLIs detected)", envPath)
 	}
 
+	// --- Step 9b: Write env.fish if fish shell is installed ---
+	if hasFishConfig(realHome) {
+		fishPath := filepath.Join(userQuintDir, "env.fish")
+		fishContent := generateEnvFish(bundlePath, userCertPath, port, agents)
+		if err := os.WriteFile(fishPath, []byte(fishContent), 0o644); err != nil {
+			warn("write env.fish: %v", err)
+		} else {
+			step("Wrote %s", fishPath)
+		}
+	}
+
 	// --- Step 10: Add source line to shell profiles ---
 	sourceLine := fmt.Sprintf("[ -f %s ] && source %s", envPath, envPath)
 	profilesModified := 0
@@ -197,6 +221,18 @@ func runSetup(args []string) {
 			step("Added source line to ~/%s", profile)
 		}
 	}
+
+	// Fish shell profile
+	if hasFishConfig(realHome) {
+		fishPath := filepath.Join(userQuintDir, "env.fish")
+		fishConfigPath := filepath.Join(realHome, ".config", "fish", "config.fish")
+		fishSourceLine := fmt.Sprintf("source %s", fishPath)
+		if addLineToFile(fishConfigPath, fishSourceLine, ".quint/env.fish") {
+			profilesModified++
+			step("Added source line to ~/.config/fish/config.fish")
+		}
+	}
+
 	if profilesModified == 0 {
 		step("Shell profiles already configured")
 	}
@@ -301,6 +337,23 @@ func runEnvOnly(realHome string, port int) {
 	envContent := generateEnvSh(bundlePath, certPath, port, agents)
 	if err := os.WriteFile(envPath, []byte(envContent), 0o644); err != nil {
 		fatal("write env.sh: %v", err)
+	}
+
+	// Generate fish config if fish shell is installed
+	if hasFishConfig(realHome) {
+		fishPath := filepath.Join(userQuintDir, "env.fish")
+		fishContent := generateEnvFish(bundlePath, certPath, port, agents)
+		if err := os.WriteFile(fishPath, []byte(fishContent), 0o644); err != nil {
+			warn("write env.fish: %v", err)
+		} else {
+			fmt.Printf("  Wrote %s\n", fishPath)
+			// Add source line to fish config if not already present
+			fishConfigPath := filepath.Join(realHome, ".config", "fish", "config.fish")
+			fishSourceLine := fmt.Sprintf("source %s", fishPath)
+			if addLineToFile(fishConfigPath, fishSourceLine, ".quint/env.fish") {
+				fmt.Printf("  Added source line to %s\n", fishConfigPath)
+			}
+		}
 	}
 
 	// Fix ownership

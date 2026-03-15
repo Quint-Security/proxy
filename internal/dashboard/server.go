@@ -44,12 +44,26 @@ type Server struct {
 
 	// HTTP server (stored for graceful shutdown in async mode)
 	httpServer *http.Server
+
+	// Health endpoint fields
+	startTime      time.Time
+	version        string
+	proxyPort      int
+	caCertPath     string
+	agentsDetected []string
+	cloudConnected bool
+	lastHeartbeat  time.Time
+	healthMu       sync.RWMutex
 }
 
 // Opts configures the API server.
 type Opts struct {
-	DataDir string
-	Policy  intercept.PolicyConfig
+	DataDir        string
+	Policy         intercept.PolicyConfig
+	Version        string
+	ProxyPort      int
+	CACertPath     string
+	AgentsDetected []string
 }
 
 // New creates a new dashboard server.
@@ -90,6 +104,11 @@ func NewWithOpts(opts Opts) (*Server, error) {
 		stopPoll:          make(chan struct{}),
 		graphClients:      make(map[chan string]struct{}),
 		httpStreamClients: make(map[chan string]struct{}),
+		startTime:         time.Now(),
+		version:           opts.Version,
+		proxyPort:         opts.ProxyPort,
+		caCertPath:        opts.CACertPath,
+		agentsDetected:    opts.AgentsDetected,
 	}
 
 	// Verify audit chain integrity on startup
@@ -106,6 +125,9 @@ func NewWithOpts(opts Opts) (*Server, error) {
 // buildMux creates the HTTP mux with all routes.
 func (s *Server) buildMux() (*http.ServeMux, error) {
 	mux := http.NewServeMux()
+
+	// Health endpoint (lightweight, no auth)
+	mux.HandleFunc("/health", s.handleHealth)
 
 	// API routes
 	mux.HandleFunc("/api/status", s.handleStatus)
@@ -216,6 +238,96 @@ func (s *Server) json(w http.ResponseWriter, status int, data any) {
 
 func (s *Server) jsonErr(w http.ResponseWriter, status int, msg string) {
 	s.json(w, status, map[string]string{"error": msg})
+}
+
+// SetCloudStatus updates the cloud connection status for the health endpoint.
+func (s *Server) SetCloudStatus(connected bool) {
+	s.healthMu.Lock()
+	defer s.healthMu.Unlock()
+	s.cloudConnected = connected
+	if connected {
+		s.lastHeartbeat = time.Now()
+	}
+}
+
+// RecordHeartbeat records a successful cloud heartbeat timestamp.
+func (s *Server) RecordHeartbeat() {
+	s.healthMu.Lock()
+	defer s.healthMu.Unlock()
+	s.lastHeartbeat = time.Now()
+}
+
+// handleHealth returns a rich health status for the proxy.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	stats := s.auditDB.Stats()
+
+	totalEntries, _ := stats["total_entries"].(int)
+	denied, _ := stats["denied"].(int)
+
+	// Check CA cert
+	caTrusted := false
+	certPath := s.caCertPath
+	if certPath != "" {
+		if _, err := os.Stat(certPath); err == nil {
+			caTrusted = true
+		}
+	}
+
+	// Build agents list
+	agents := s.agentsDetected
+	if agents == nil {
+		agents = []string{}
+	}
+
+	// Uptime
+	uptimeSeconds := int64(time.Since(s.startTime).Seconds())
+
+	// Proxy port
+	proxyPort := s.proxyPort
+	if proxyPort == 0 {
+		proxyPort = 9090
+	}
+
+	// Cloud status
+	s.healthMu.RLock()
+	cloudConn := s.cloudConnected
+	lastHB := s.lastHeartbeat
+	s.healthMu.RUnlock()
+
+	cloudInfo := map[string]any{
+		"connected": cloudConn,
+	}
+	if !lastHB.IsZero() {
+		cloudInfo["last_heartbeat"] = lastHB.UTC().Format(time.RFC3339)
+	}
+
+	// Version
+	ver := s.version
+	if ver == "" {
+		ver = "dev"
+	}
+
+	response := map[string]any{
+		"status":          "healthy",
+		"version":         ver,
+		"uptime_seconds":  uptimeSeconds,
+		"proxy": map[string]any{
+			"listening": true,
+			"port":      proxyPort,
+		},
+		"ca": map[string]any{
+			"trusted":   caTrusted,
+			"cert_path": certPath,
+		},
+		"agents_detected": agents,
+		"stats": map[string]any{
+			"events_total":   totalEntries,
+			"events_blocked": denied,
+		},
+		"cloud": cloudInfo,
+	}
+
+	s.json(w, 200, response)
 }
 
 // --- Handlers ---
